@@ -175,7 +175,7 @@ async function findManifest() {
 // --- bordjes (huisnummers + straatnamen) -------------------------------------
 // NL-straatnaambord: verkeersblauw vlak, witte rand, witte kapitalen.
 const SIGN_BLUE = '#00519e';
-const labelState = { numbers: [], signs: [], textures: new Map() };
+const labelState = { numbers: [], signs: [], streets: [], textures: new Map() };
 
 function labelTexture(text, { width, height, fontPx, border }) {
   const key = `${text}|${width}`;
@@ -216,6 +216,30 @@ function makePlaque(text, pos, n, { big }) {
   return mesh;
 }
 
+function streetNameTexture(text) {
+  const key = `street|${text}`;
+  if (labelState.textures.has(key)) return labelState.textures.get(key);
+  const fontPx = 96;
+  const canvas = document.createElement('canvas');
+  canvas.width = fontPx * 0.62 * text.length + 80;
+  canvas.height = 150;
+  const ctx = canvas.getContext('2d');
+  ctx.font = `600 ${fontPx}px system-ui, Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = 'rgba(20, 24, 44, 0.9)';
+  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.userData = { aspect: canvas.width / canvas.height };
+  labelState.textures.set(key, tex);
+  return tex;
+}
+
 function buildLabels(data) {
   const group = new THREE.Group();
   for (const item of data.items ?? []) {
@@ -228,14 +252,46 @@ function buildLabels(data) {
     labelState.signs.push(plaque);
     group.add(plaque);
   }
+
+  // zwevende straatnamen boven de straat: orientatie in de wijk
+  const byStreet = new Map();
+  for (const item of data.items ?? []) {
+    if (!byStreet.has(item.street)) byStreet.set(item.street, []);
+    byStreet.get(item.street).push(item.pos);
+  }
+  for (const [street, positions] of byStreet) {
+    if (positions.length < 2) continue; // losse adressen geen wijklabel
+    const c = positions
+      .reduce((acc, p) => acc.add(new THREE.Vector3(...p)), new THREE.Vector3())
+      .divideScalar(positions.length);
+    const tex = streetNameTexture(street);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex,
+      depthTest: false, // altijd leesbaar, ook achter huizen/bomen
+      transparent: true,
+      opacity: 0.92,
+    }));
+    sprite.renderOrder = 999;
+    sprite.position.set(c.x, c.y + 24, c.z);
+    sprite.userData.aspect = tex.userData.aspect;
+    labelState.streets.push(sprite);
+    group.add(sprite);
+  }
   scene.add(group);
 }
 
 let labelTick = 0;
 function updateLabelVisibility() {
+  const p = camera.position;
+  // straatnamen elke frame herschalen: constante schermgrootte
+  for (const s of labelState.streets) {
+    const d = s.position.distanceTo(p);
+    const h = THREE.MathUtils.clamp(d * 0.055, 3.5, 26);
+    s.scale.set(h * s.userData.aspect, h, 1);
+    s.material.opacity = d < 28 ? 0 : 0.92; // vlak eronder: niet in je gezicht
+  }
   // huisnummers alleen dichtbij tonen; straatnaamborden dragen verder
   if (++labelTick % 30 !== 0) return;
-  const p = camera.position;
   for (const m of labelState.numbers) m.visible = m.position.distanceToSquared(p) < 70 * 70;
   for (const m of labelState.signs) m.visible = m.position.distanceToSquared(p) < 220 * 220;
 }

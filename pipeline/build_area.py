@@ -37,12 +37,13 @@ def build_synthetic(out_dir: Path) -> dict:
     def ground(x: float, y: float) -> float:
         return terrain.sample_height(heights, SYNTHETIC_RES_M, x, y)
 
-    label_data = labels.place_labels(addresses, soup, ground)
+    overlays = synthetic.synthetic_overlays(heights, SYNTHETIC_RES_M, SYNTHETIC_SIZE_M)
+    road_points = np.array([tri.mean(axis=0)[:2] for tri in overlays.triangles.get("road", [])])
+    label_data = labels.place_labels(addresses, soup, ground, road_points=road_points)
     (out_dir / "demo-addresses.json").write_text(json.dumps(label_data))
 
     trees.plant_trees(soup, synthetic.synthetic_tree_positions(SYNTHETIC_SIZE_M), ground)
 
-    overlays = synthetic.synthetic_overlays(heights, SYNTHETIC_RES_M, SYNTHETIC_SIZE_M)
     for cls, tris in overlays.triangles.items():
         for tri, tint in zip(tris, overlays.tints[cls]):
             soup.add(cls, tri, tint)
@@ -136,7 +137,11 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
             addr["x"] -= origin[0]
             addr["y"] -= origin[1]
         if raw_addresses:
-            label_data = labels.place_labels(raw_addresses, soup, ground)
+            road_points = None
+            if "road" in surface_masks:
+                rr, cc = np.nonzero(surface_masks["road"])
+                road_points = np.column_stack([(cc + 0.5) * res, (rr + 0.5) * res])
+            label_data = labels.place_labels(raw_addresses, soup, ground, road_points=road_points)
             addresses_file = f"{area_id}-addresses.json"
             (out_dir / addresses_file).write_text(json.dumps(label_data))
     except Exception as exc:  # noqa: BLE001
@@ -173,7 +178,9 @@ def assemble_meshes(
 
     if surface_masks:
         normals = terrain.normals_grid(heights, resolution_m)
-        lifts = {"sand": 0.03, "road": 0.06, "water": -0.25, "green": 0.02}
+        # alles net boven het terrein: het gras-grid tekent er anders overheen
+        # (water stond eerst op -0.25 en was daardoor onzichtbaar)
+        lifts = {"sand": 0.03, "road": 0.06, "water": 0.05, "green": 0.02}
         for cls, mask in surface_masks.items():
             mesh = terrain.overlay_from_mask(
                 heights, resolution_m, mask, cls, lifts.get(cls, 0.05), normals

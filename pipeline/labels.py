@@ -44,22 +44,52 @@ def _wall_data(soup: TriangleSoup):
     return np.asarray(cents), np.asarray(norms)
 
 
-def place_labels(addresses: list[dict], soup: TriangleSoup, ground_sampler) -> dict:
-    """Bereken bordposities. addresses hebben lokale x/y (origin al afgetrokken)."""
+def place_labels(
+    addresses: list[dict],
+    soup: TriangleSoup,
+    ground_sampler,
+    road_points: np.ndarray | None = None,
+) -> dict:
+    """Bereken bordposities. addresses hebben lokale x/y (origin al afgetrokken).
+
+    Met road_points (N,2) kiezen we niet de dichtstbijzijnde gevel, maar de
+    gevel die het dichtst bij de weg ligt — het huisnummer hangt dan aan de
+    straatkant (voordeur) i.p.v. aan een achterpad of zijmuur.
+    """
     cents, norms = _wall_data(soup)
+    rp = np.asarray(road_points, dtype=np.float64) if road_points is not None and len(road_points) else None
     items = []
     for addr in addresses:
         p = np.array([addr["x"], addr["y"]])
         if cents is not None:
             d2 = (cents[:, 0] - p[0]) ** 2 + (cents[:, 1] - p[1]) ** 2
-            i = int(np.argmin(d2))
-            if d2[i] <= MAX_WALL_DIST**2:
-                n = norms[i]
+            cand = np.nonzero(d2 <= MAX_WALL_DIST**2)[0]
+            if len(cand):
                 # normaal moet van het adrespunt (binnen het pand) af wijzen
-                to_out = cents[i, :2] - p
-                if np.dot(n, to_out) < 0:
-                    n = -n
-                pos_xy = cents[i, :2] + n * PLAQUE_OFFSET
+                to_out = cents[cand, :2] - p
+                flip = np.sign(np.einsum("ij,ij->i", norms[cand], to_out))
+                flip[flip == 0] = 1.0
+                cand_norms = norms[cand] * flip[:, None]
+
+                if rp is not None:
+                    # score: afstand van 'n stap voor de gevel tot de weg,
+                    # plus lichte voorkeur voor gevels dicht bij het adres
+                    cand = cand[np.argsort(d2[cand])[:120]]
+                    to_out = cents[cand, :2] - p
+                    flip = np.sign(np.einsum("ij,ij->i", norms[cand], to_out))
+                    flip[flip == 0] = 1.0
+                    cand_norms = norms[cand] * flip[:, None]
+                    outs = cents[cand, :2] + cand_norms * 3.5
+                    road_d = np.sqrt(
+                        ((outs[:, None, :] - rp[None, :, :]) ** 2).sum(axis=2)
+                    ).min(axis=1)
+                    score = road_d + 0.35 * np.sqrt(d2[cand])
+                    k = int(np.argmin(score))
+                else:
+                    k = int(np.argmin(d2[cand]))
+
+                n = cand_norms[k]
+                pos_xy = cents[cand[k], :2] + n * PLAQUE_OFFSET
                 items.append(_entry(addr, pos_xy, n, ground_sampler))
                 continue
         # geen gevel in de buurt: bordje op het adrespunt zelf, richting noord

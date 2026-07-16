@@ -29,22 +29,29 @@ def fetch_addresses(bbox_rd: list[float], cache_dir: str | Path) -> list[dict]:
     session.headers["User-Agent"] = "local-damage-pipeline/0.1"
 
     minx, miny, maxx, maxy = bbox_rd
+    marker = cache / "_bag_complete.json"
+    cached_pages = json.loads(marker.read_text())["pages"] if marker.exists() else None
     addresses: list[dict] = []
-    for page in range(MAX_PAGES):
-        params = {
-            "service": "WFS",
-            "version": "2.0.0",
-            "request": "GetFeature",
-            "typeName": TYPE_NAME,
-            "outputFormat": "application/json",
-            "srsName": "urn:ogc:def:crs:EPSG::28992",
-            "bbox": f"{minx},{miny},{maxx},{maxy},urn:ogc:def:crs:EPSG::28992",
-            "count": PAGE_SIZE,
-            "startIndex": page * PAGE_SIZE,
-        }
-        data = _get_json(session, params)
-        (cache / f"bag_vbo_{page:02d}.json").write_text(json.dumps(data))
+    n_pages = 0
+    for page in range(cached_pages if cached_pages is not None else MAX_PAGES):
+        if cached_pages is not None:
+            data = json.loads((cache / f"bag_vbo_{page:02d}.json").read_text())
+        else:
+            params = {
+                "service": "WFS",
+                "version": "2.0.0",
+                "request": "GetFeature",
+                "typeName": TYPE_NAME,
+                "outputFormat": "application/json",
+                "srsName": "urn:ogc:def:crs:EPSG::28992",
+                "bbox": f"{minx},{miny},{maxx},{maxy},urn:ogc:def:crs:EPSG::28992",
+                "count": PAGE_SIZE,
+                "startIndex": page * PAGE_SIZE,
+            }
+            data = _get_json(session, params)
+            (cache / f"bag_vbo_{page:02d}.json").write_text(json.dumps(data))
         features = data.get("features", [])
+        n_pages = page + 1
         for feat in features:
             props = feat.get("properties") or {}
             geom = feat.get("geometry") or {}
@@ -71,6 +78,8 @@ def fetch_addresses(bbox_rd: list[float], cache_dir: str | Path) -> list[dict]:
         if len(features) < PAGE_SIZE:
             break
 
+    if cached_pages is None:
+        marker.write_text(json.dumps({"pages": n_pages}))
     return addresses
 
 

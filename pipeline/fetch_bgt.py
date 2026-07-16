@@ -51,11 +51,16 @@ def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, lis
     for collection, cls in COLLECTIONS.items():
         polygons: list[list[np.ndarray]] = []
         n_feats = 0
+        marker = cache / f"_bgt_{collection}_complete.json"
+        cached_pages = json.loads(marker.read_text())["pages"] if marker.exists() else None
         url = f"{API_BASE}/collections/{collection}/items"
         params: dict | None = {"bbox": bbox_wgs, "limit": PAGE_LIMIT, "f": "json"}
-        for page in range(MAX_PAGES):
-            data = _get_json(session, url, params)
-            (cache / f"bgt_{collection}_{page:02d}.json").write_text(json.dumps(data))
+        for page in range(cached_pages if cached_pages is not None else MAX_PAGES):
+            if cached_pages is not None:
+                data = json.loads((cache / f"bgt_{collection}_{page:02d}.json").read_text())
+            else:
+                data = _get_json(session, url, params)
+                (cache / f"bgt_{collection}_{page:02d}.json").write_text(json.dumps(data))
             for feat in data.get("features", []):
                 props = feat.get("properties") or {}
                 # bruggen/tunnels (relatieve hoogteligging != 0) niet op maaiveld verven
@@ -68,6 +73,10 @@ def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, lis
             if not next_url:
                 break
             url, params = next_url, None
+        if cached_pages is None:
+            marker.write_text(json.dumps({"pages": page + 1}))
+        else:
+            log.info("bgt %s uit cache", collection)
         log.info("bgt %s: %d features, %d polygonen", collection, n_feats, len(polygons))
         result[cls] = polygons
 

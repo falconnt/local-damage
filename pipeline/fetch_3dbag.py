@@ -50,10 +50,46 @@ def _bbox_variants(bbox_rd: list[float]) -> list[tuple[str, dict]]:
     ]
 
 
+def _ingest_page(data: dict, page: int, metadata: dict, features: list[dict]) -> dict:
+    """Features + pagina-transform uit een (mogelijk gecachte) pagina halen."""
+    metadata = data.get("metadata") or metadata
+    page_feats = data.get("features")
+    if page_feats is None and "CityObjects" in data:
+        # sommige antwoorden zijn 1 CityJSON-document i.p.v. een featurelijst
+        page_feats = [data]
+    # BELANGRIJK: elke pagina komt uit een andere interne tegel met een
+    # eigen transform (translate). Die moet bij de features blijven, anders
+    # staan gebouwen van latere pagina's honderden meters verschoven.
+    page_transform = (data.get("metadata") or {}).get("transform")
+    if page_transform:
+        for feat in page_feats or []:
+            if isinstance(feat, dict):
+                feat.setdefault("_page_transform", page_transform)
+    features.extend(page_feats or [])
+    log.info("3dbag pagina %d: %d features (totaal %d)", page, len(page_feats or []), len(features))
+    return metadata
+
+
 def fetch_buildings(bbox_rd: list[float], cache_dir: str | Path) -> tuple[dict, list[dict]]:
-    """Haal alle panden binnen de RD-bbox op. Returnt (metadata, features)."""
+    """Haal alle panden binnen de RD-bbox op. Returnt (metadata, features).
+
+    Volledige eerdere antwoorden worden uit cache_dir hergebruikt (marker
+    "_3dbag_complete.json"), zodat een CI-run met actions/cache niet elke
+    tegel opnieuw hoeft te downloaden.
+    """
     cache = Path(cache_dir)
     cache.mkdir(parents=True, exist_ok=True)
+
+    marker = cache / "_3dbag_complete.json"
+    if marker.exists():
+        n_pages = json.loads(marker.read_text())["pages"]
+        metadata: dict = {}
+        features: list[dict] = []
+        for page in range(n_pages):
+            data = json.loads((cache / f"3dbag_page_{page:03d}.json").read_text())
+            metadata = _ingest_page(data, page, metadata, features)
+        log.info("3dbag uit cache: %d features (%d pagina's)", len(features), n_pages)
+        return metadata, features
 
     session = requests.Session()
     session.headers["User-Agent"] = "local-damage-pipeline/0.1 (+github.com/falconnt/local-damage)"
@@ -89,34 +125,21 @@ def fetch_buildings(bbox_rd: list[float], cache_dir: str | Path) -> tuple[dict, 
     metadata: dict = {}
     features: list[dict] = []
     data = first_page
+    n_pages = 0
     for page in range(MAX_PAGES):
         if page > 0:
             resp = _get_with_retry(session, url, params)
             data = resp.json()
         (cache / f"3dbag_page_{page:03d}.json").write_text(json.dumps(data))
-
-        metadata = data.get("metadata") or metadata
-        page_feats = data.get("features")
-        if page_feats is None and "CityObjects" in data:
-            # sommige antwoorden zijn 1 CityJSON-document i.p.v. een featurelijst
-            page_feats = [data]
-        # BELANGRIJK: elke pagina komt uit een andere interne tegel met een
-        # eigen transform (translate). Die moet bij de features blijven, anders
-        # staan gebouwen van latere pagina's honderden meters verschoven.
-        page_transform = (data.get("metadata") or {}).get("transform")
-        if page_transform:
-            log.info("3dbag pagina %d translate: %s", page, page_transform.get("translate"))
-            for feat in page_feats or []:
-                if isinstance(feat, dict):
-                    feat.setdefault("_page_transform", page_transform)
-        features.extend(page_feats or [])
-        log.info("3dbag pagina %d: %d features (totaal %d)", page, len(page_feats or []), len(features))
+        metadata = _ingest_page(data, page, metadata, features)
+        n_pages = page + 1
 
         next_url = _next_link(data)
         if not next_url:
             break
         url, params = next_url, None  # next-link bevat de query al
 
+    marker.write_text(json.dumps({"pages": n_pages}))
     return metadata, features
 
 

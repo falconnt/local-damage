@@ -23,7 +23,11 @@ Daardoor kan dezelfde data-backend later ook Unity/Godot/Unreal voeden.
       besturing (joystick-uitslag = looptempo), laadbalk, safe-area-UI.
       Startwijk instelbaar per config; geocoding via PDOK Locatieserver
       (default: Bosven, Veghel).
-- [ ] Stap 2 — quadtree-tiling + preloading; BGT/OSM-wegen en water.
+- [x] **Stap 2 — tiling + preloading.** Regio's bestaan uit 500 m-tegels op
+      het vaste RD-raster (`tiles_radius` in de config). De viewer streamt:
+      tegels laden binnen ~620 m (achter de fog, dus onzichtbaar) en worden
+      buiten ~950 m opgeruimd. BGT-wegen/water/groen + bomen + bordjes zitten
+      per tegel. CI cachet API-antwoorden tussen runs (actions/cache).
 - [ ] Stap 3 — stylering verfijnen (tilt-shift DoF, bloom, grain, bomen);
       evt. overstap op 3D Tiles + `3d-tiles-renderer`.
 - [ ] Stap 4 — engine-integratie (Godot/Unity/Unreal op dezelfde backend).

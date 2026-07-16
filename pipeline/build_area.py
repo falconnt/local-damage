@@ -65,25 +65,24 @@ def build_synthetic(out_dir: Path) -> dict:
     }
 
 
-def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
+TILE_M = 500.0  # tegelmaat op het vaste RD-raster (streaming, roadmap stap 2)
+
+
+def build_tile(
+    tile_id: str,
+    bbox: list[float],
+    res: float,
+    out_dir: Path,
+    cache_dir: Path,
+    require_buildings: bool = True,
+) -> dict:
+    """Bouw één tegel (GLB + bordjes-JSON) voor de gegeven RD-bbox."""
     from . import fetch_3dbag, fetch_ahn, fetch_bag, fetch_bgt, labels  # lazy: online route
 
-    config = json.loads(config_path.read_text())
-    area_id = config["id"]
-    if "bbox_rd" in config:
-        bbox = [float(v) for v in config["bbox_rd"]]
-    elif "locatieserver_query" in config:
-        from . import geocode
-
-        x, y, naam = geocode.geocode_rd(config["locatieserver_query"])
-        bbox = geocode.bbox_around(x, y, float(config.get("size_m", 500)))
-        log.info("gebied %s gecentreerd op %s", area_id, naam)
-    else:
-        raise ValueError(f"config {area_id} heeft bbox_rd noch locatieserver_query")
-    res = float(config.get("terrain", {}).get("resolution_m", 2.0))
+    area_id = tile_id
     origin = np.array([bbox[0], bbox[1]], dtype=np.float64)
     size_x, size_y = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    log.info("gebied %s: bbox %s (%.0fx%.0f m)", area_id, bbox, size_x, size_y)
+    log.info("tegel %s: bbox %s (%.0fx%.0f m)", area_id, bbox, size_x, size_y)
 
     # 1) terrein (AHN DTM); vlak op NAP 0 als fallback
     tif = fetch_ahn.fetch_dtm(bbox, cache_dir / area_id)
@@ -109,11 +108,14 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
     )
     n_tris = sum(len(v) for v in soup.triangles.values())
     if n_tris == 0:
-        # een echte wijk zonder één gebouw is vrijwel zeker een fetch/parse-bug;
-        # liever falen (CI valt terug op de demo) dan een lege wereld deployen
-        raise RuntimeError(
-            f"geen gebouw-geometrie voor {area_id} — controleer cache-JSON in {cache_dir / area_id}"
-        )
+        if require_buildings:
+            # een echte wijk zonder één gebouw is vrijwel zeker een fetch/parse-bug;
+            # liever falen (CI valt terug op de demo) dan een lege wereld deployen
+            raise RuntimeError(
+                f"geen gebouw-geometrie voor {area_id} — controleer cache-JSON in {cache_dir / area_id}"
+            )
+        # randtegels (weiland/bos) mogen leeg zijn: terrein + BGT blijven waardevol
+        log.warning("tegel %s heeft geen gebouwen (weiland?) — doorgaan", area_id)
 
     # 3) ondergronden uit de BGT (tolerant: zonder BGT blijft alles gras)
     surface_masks = {}
@@ -156,15 +158,64 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
     log.info("geschreven: %s (%.1f MB)", out, out.stat().st_size / 1e6)
     entry = {
         "id": area_id,
-        "name": config.get("name", area_id),
         "file": f"{area_id}.glb",
         "origin_rd": list(origin),
         "bbox_rd": bbox,
-        "attribution": "3DBAG (CC BY 4.0, tudelft3d & 3DGI) · AHN/BGT/BAG via PDOK",
     }
     if addresses_file:
         entry["addresses"] = addresses_file
     return entry
+
+
+def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
+    """Legacy: één losse wijk met vaste bbox (bv. delft-centrum)."""
+    config = json.loads(config_path.read_text())
+    bbox = [float(v) for v in config["bbox_rd"]]
+    res = float(config.get("terrain", {}).get("resolution_m", 2.0))
+    entry = build_tile(config["id"], bbox, res, out_dir, cache_dir)
+    entry["name"] = config.get("name", config["id"])
+    entry["attribution"] = "3DBAG (CC BY 4.0, tudelft3d & 3DGI) · AHN/BGT/BAG via PDOK"
+    return entry
+
+
+def build_region(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
+    """Regio: (2r+1)^2 tegels van TILE_M op het vaste RD-raster rond de query.
+
+    Tegels liggen op rasterveelvouden zodat buren exact aansluiten en
+    tile-id's stabiel blijven als de regio later groeit.
+    """
+    from . import geocode
+
+    config = json.loads(config_path.read_text())
+    region_id = config["id"]
+    res = float(config.get("terrain", {}).get("resolution_m", 2.0))
+    radius = int(config.get("tiles_radius", 1))
+
+    x, y, naam = geocode.geocode_rd(config["locatieserver_query"])
+    log.info("regio %s gecentreerd op %s (RD %.0f, %.0f)", region_id, naam, x, y)
+    tx0, ty0 = int(x // TILE_M), int(y // TILE_M)
+
+    tiles = []
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            tx, ty = tx0 + dx, ty0 + dy
+            tile_id = f"{region_id}_x{tx}_y{ty}"
+            bbox = [tx * TILE_M, ty * TILE_M, (tx + 1) * TILE_M, (ty + 1) * TILE_M]
+            entry = build_tile(
+                tile_id, bbox, res, out_dir, cache_dir,
+                require_buildings=(dx == 0 and dy == 0),  # alleen de kern moet raak zijn
+            )
+            entry["tx"], entry["ty"] = tx, ty
+            tiles.append(entry)
+
+    return {
+        "id": region_id,
+        "name": config.get("name", region_id),
+        "tile_size_m": TILE_M,
+        "spawn_rd": [x, y],
+        "tiles": tiles,
+        "attribution": "3DBAG (CC BY 4.0, tudelft3d & 3DGI) · AHN/BGT/BAG via PDOK",
+    }
 
 
 def assemble_meshes(
@@ -209,21 +260,33 @@ def main(argv: list[str] | None = None) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
 
     areas: list[dict] = []
+    regions: list[dict] = []
     manifest_path = args.out / "index.json"
     if manifest_path.exists():
-        areas = json.loads(manifest_path.read_text()).get("areas", [])
+        old = json.loads(manifest_path.read_text())
+        areas = old.get("areas", [])
+        regions = old.get("regions", [])
 
     if args.synthetic:
         entry = build_synthetic(args.out)
+        areas = [a for a in areas if a.get("id") != entry["id"]] + [entry]
     elif args.config:
-        entry = build_real(args.config, args.out, args.cache)
+        config = json.loads(args.config.read_text())
+        if "bbox_rd" in config:
+            entry = build_real(args.config, args.out, args.cache)
+            areas = [a for a in areas if a.get("id") != entry["id"]] + [entry]
+        else:
+            entry = build_region(args.config, args.out, args.cache)
+            regions = [r for r in regions if r.get("id") != entry["id"]] + [entry]
     else:
         parser.error("geef --config of --synthetic op")
         return 2
 
-    areas = [a for a in areas if a.get("id") != entry["id"]] + [entry]
-    glb.write_manifest(args.out, areas)
-    log.info("manifest bijgewerkt: %s (%d gebieden)", manifest_path, len(areas))
+    glb.write_manifest(args.out, areas, regions)
+    log.info(
+        "manifest bijgewerkt: %s (%d gebieden, %d regio's)",
+        manifest_path, len(areas), len(regions),
+    )
     return 0
 
 

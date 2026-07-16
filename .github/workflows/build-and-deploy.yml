@@ -38,6 +38,17 @@ jobs:
       - name: Install pipeline dependencies
         run: pip install -r pipeline/requirements.txt
 
+      # API-antwoorden cachen tussen runs: een 3x3-regio opnieuw bouwen
+      # kost anders ~25 min aan fetches
+      - name: Restore fetch cache
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: fetch-cache-${{ hashFiles('data-sources/*.json') }}-${{ github.run_id }}
+          restore-keys: |
+            fetch-cache-${{ hashFiles('data-sources/*.json') }}-
+            fetch-cache-
+
       - name: Assemble site (viewer + demo-fallback-tiles)
         run: |
           mkdir -p site/tiles

@@ -13,7 +13,7 @@ const FLY_SPEED = 22.0;
 const FLY_FAST = 45.0;
 
 const state = {
-  paletteName: 'sunset',
+  paletteName: 'afternoon',
   palettes: {},
   yaw: 0,
   pitch: -0.05,
@@ -89,77 +89,207 @@ init().catch((err) => {
   document.getElementById('area-name').textContent = 'laden mislukt — zie console';
 });
 
+const loader = new GLTFLoader();
+const TILE_LOAD_M = 620;   // laden ruim achter de fog-grens: pop-in blijft onzichtbaar
+const TILE_UNLOAD_M = 950; // ver weg = geheugen teruggeven
+
 async function init() {
   state.palettes = await (await fetch('./palettes/palettes.json')).json();
   buildPaletteButtons();
 
-  const { base, manifest } = await findManifest();
-  const area = manifest.areas[manifest.areas.length - 1]; // nieuwste gebied
-  document.getElementById('area-name').textContent = `${area.name} — laden…`;
+  // schaduwbox volgt de speler (vaste maat), zon-target wordt per frame gezet
+  Object.assign(sun.shadow.camera, { left: -380, right: 380, top: 380, bottom: -380, far: 2500 });
 
-  // laadbalk: GLB's van echte wijken zijn 10-20 MB, op mobiel duurt dat even
+  const { base, manifest } = await findManifest();
+  if (manifest.regions?.length) {
+    await initRegion(base, manifest.regions[manifest.regions.length - 1]);
+  } else {
+    await initLegacyArea(base, manifest.areas[manifest.areas.length - 1]);
+  }
+
+  applyPalette(state.paletteName);
+  setupControls();
+  renderer.setAnimationLoop(tick);
+}
+
+function prepareMesh(node) {
+  // klasse uit glTF-extras (userData); naam-fallbacks voor andere bakes
+  const cls = node.userData.cls
+    ?? node.parent?.userData?.cls
+    ?? ((node.material?.name || '').startsWith('class:') ? node.material.name.slice(6) : null)
+    ?? ((node.name || '').match(/^class[:_]?(\w+)/)?.[1] ?? 'wall');
+  const baked = node.material?.color?.clone() ?? new THREE.Color('#cccccc');
+  node.material = new THREE.MeshToonMaterial({
+    color: baked,
+    gradientMap,
+    vertexColors: Boolean(node.geometry.getAttribute('color')),
+  });
+  node.userData.cls = cls;
+  node.castShadow = cls === 'roof' || cls === 'wall' || cls === 'tree' || cls === 'trunk';
+  node.receiveShadow = true;
+  if (!state.classMeshes.has(cls)) state.classMeshes.set(cls, new Set());
+  state.classMeshes.get(cls).add(node);
+  return cls;
+}
+
+async function loadGlbWithProgress(url, label) {
   const progressBar = document.querySelector('#progress .bar');
-  const gltf = await new GLTFLoader().loadAsync(base + area.file, (evt) => {
+  document.getElementById('area-name').textContent = `${label} — laden…`;
+  const gltf = await loader.loadAsync(url, (evt) => {
     if (evt.total > 0) {
       progressBar.style.width = `${Math.round((evt.loaded / evt.total) * 100)}%`;
     } else {
       progressBar.style.width = '100%';
       document.getElementById('area-name').textContent =
-        `${area.name} — ${(evt.loaded / 1e6).toFixed(1)} MB geladen…`;
+        `${label} — ${(evt.loaded / 1e6).toFixed(1)} MB geladen…`;
     }
   });
-  document.getElementById('area-name').textContent = area.name;
+  document.getElementById('area-name').textContent = label;
   document.getElementById('progress').classList.add('hidden');
+  return gltf;
+}
+
+function spawnAt(x, z) {
+  state.yaw = 0; // -Z = noord
+  camera.position.set(x, 500, z);
+  const ground = groundHeight(x, z);
+  camera.position.y = (ground ?? 0) + EYE_HEIGHT;
+}
+
+// --- legacy: één losse wijk (demo / bbox-configs) ----------------------------
+async function initLegacyArea(base, area) {
+  const gltf = await loadGlbWithProgress(base + area.file, area.name);
   const worldBounds = new THREE.Box3();
   gltf.scene.traverse((node) => {
     if (!node.isMesh) return;
-    // klasse uit glTF-extras (userData); naam-fallbacks voor andere bakes
-    const cls = node.userData.cls
-      ?? node.parent?.userData?.cls
-      ?? ((node.material?.name || '').startsWith('class:') ? node.material.name.slice(6) : null)
-      ?? ((node.name || '').match(/^class[:_]?(\w+)/)?.[1] ?? 'wall');
-    const baked = node.material?.color?.clone() ?? new THREE.Color('#cccccc');
-    node.material = new THREE.MeshToonMaterial({
-      color: baked,
-      gradientMap,
-      vertexColors: Boolean(node.geometry.getAttribute('color')),
-    });
-    node.userData.cls = cls;
-    node.castShadow = cls === 'roof' || cls === 'wall' || cls === 'tree' || cls === 'trunk';
-    node.receiveShadow = true;
-    state.classMeshes.set(cls, [...(state.classMeshes.get(cls) ?? []), node]);
+    const cls = prepareMesh(node);
     if (cls === 'grass' || cls === 'road' || cls === 'ground') state.walkables.push(node);
     worldBounds.expandByObject(node);
   });
   scene.add(gltf.scene);
 
-  // huisnummerbordjes + straatnaamborden (blauw/wit, NL-stijl)
   if (area.addresses) {
     try {
       const labels = await (await fetch(base + area.addresses)).json();
-      buildLabels(labels);
+      buildLabels(labels, 0, 0);
     } catch (err) {
       console.warn('adresbordjes niet geladen:', err);
     }
   }
-
-  // spawn iets ten zuiden van het midden, kijkend richting het centrum
   const center = worldBounds.getCenter(new THREE.Vector3());
-  const spawn = { x: center.x, z: center.z + 60 };
-  state.yaw = 0; // -Z = noord = richting centrum
-  camera.position.set(spawn.x, worldBounds.max.y + 30, spawn.z);
-  const ground = groundHeight(spawn.x, spawn.z);
-  camera.position.y = (ground ?? 0) + EYE_HEIGHT;
+  spawnAt(center.x, center.z + 60);
+}
 
-  // zon-schaduwbox over het hele gebied
-  const size = worldBounds.getSize(new THREE.Vector3());
-  const radius = Math.max(size.x, size.z) * 0.75;
-  Object.assign(sun.shadow.camera, { left: -radius, right: radius, top: radius, bottom: -radius, far: 4 * radius });
-  sun.target.position.copy(center);
+// --- streaming: regio met tegels op het RD-raster ----------------------------
+async function initRegion(base, region) {
+  const wox = Math.min(...region.tiles.map((t) => t.origin_rd[0]));
+  const woy = Math.min(...region.tiles.map((t) => t.origin_rd[1]));
+  state.world = { base, region, origin: [wox, woy] };
+  state.tiles = region.tiles.map((entry) => ({
+    entry, state: 'none', group: null, meshes: [], walkables: [], labelRefs: null,
+  }));
 
-  applyPalette(state.paletteName);
-  setupControls();
-  renderer.setAnimationLoop(tick);
+  const sx = region.spawn_rd[0] - wox;
+  const sz = -(region.spawn_rd[1] - woy);
+
+  // starttegel eerst (met laadbalk), buren streamen op de achtergrond
+  const startRec = state.tiles
+    .map((rec) => [tileDistance(rec.entry, sx, sz), rec])
+    .sort((a, b) => a[0] - b[0])[0][1];
+  await loadTile(startRec, region.name);
+  spawnAt(sx, sz);
+  updateTiles();
+}
+
+function tileDistance(entry, px, pz) {
+  const [wox, woy] = state.world.origin;
+  const s = state.world.region.tile_size_m;
+  const x0 = entry.origin_rd[0] - wox;
+  const z1 = -(entry.origin_rd[1] - woy); // zuidrand
+  const dx = Math.max(x0 - px, 0, px - (x0 + s));
+  const dz = Math.max((z1 - s) - pz, 0, pz - z1);
+  return Math.hypot(dx, dz);
+}
+
+let tilesLoading = 0;
+async function loadTile(rec, progressLabel = null) {
+  if (rec.state !== 'none') return;
+  rec.state = 'loading';
+  tilesLoading += 1;
+  try {
+    const { base, origin } = state.world;
+    const e = rec.entry;
+    const gltf = progressLabel
+      ? await loadGlbWithProgress(base + e.file, progressLabel)
+      : await loader.loadAsync(base + e.file);
+    const ox = e.origin_rd[0] - origin[0];
+    const oz = -(e.origin_rd[1] - origin[1]);
+    const group = gltf.scene;
+    group.position.set(ox, 0, oz);
+    group.traverse((node) => {
+      if (!node.isMesh) return;
+      const cls = prepareMesh(node);
+      rec.meshes.push(node);
+      if (cls === 'grass' || cls === 'road' || cls === 'ground') {
+        state.walkables.push(node);
+        rec.walkables.push(node);
+      }
+    });
+    scene.add(group);
+    rec.group = group;
+    tintMeshes(rec.meshes); // huidige palet direct toepassen
+
+    if (e.addresses) {
+      try {
+        const data = await (await fetch(base + e.addresses)).json();
+        rec.labelRefs = buildLabels(data, ox, oz);
+      } catch (err) {
+        console.warn('bordjes niet geladen voor', e.id, err);
+      }
+    }
+    rec.state = 'loaded';
+  } catch (err) {
+    console.warn('tegel laden mislukt:', rec.entry.id, err);
+    rec.state = 'none';
+  } finally {
+    tilesLoading -= 1;
+  }
+}
+
+function unloadTile(rec) {
+  if (rec.state !== 'loaded') return;
+  scene.remove(rec.group);
+  for (const m of rec.meshes) {
+    state.classMeshes.get(m.userData.cls)?.delete(m);
+    m.geometry.dispose();
+    m.material.dispose(); // gradientMap is gedeeld en blijft leven
+  }
+  state.walkables = state.walkables.filter((w) => !rec.walkables.includes(w));
+  if (rec.labelRefs) {
+    scene.remove(rec.labelRefs.group);
+    for (const key of ['numbers', 'signs', 'streets']) {
+      const gone = new Set(rec.labelRefs[key]);
+      labelState[key] = labelState[key].filter((x) => !gone.has(x));
+      for (const obj of rec.labelRefs[key]) obj.geometry?.dispose(); // textures blijven gecachet
+    }
+  }
+  Object.assign(rec, { state: 'none', group: null, meshes: [], walkables: [], labelRefs: null });
+}
+
+function updateTiles() {
+  if (!state.world) return;
+  const px = camera.position.x;
+  const pz = camera.position.z;
+  const pending = state.tiles
+    .filter((r) => r.state === 'none')
+    .map((r) => [tileDistance(r.entry, px, pz), r])
+    .sort((a, b) => a[0] - b[0]);
+  for (const [d, r] of pending) {
+    if (d < TILE_LOAD_M && tilesLoading < 2) loadTile(r);
+  }
+  for (const r of state.tiles) {
+    if (r.state === 'loaded' && tileDistance(r.entry, px, pz) > TILE_UNLOAD_M) unloadTile(r);
+  }
 }
 
 async function findManifest() {
@@ -240,16 +370,20 @@ function streetNameTexture(text) {
   return tex;
 }
 
-function buildLabels(data) {
+function buildLabels(data, ox = 0, oz = 0) {
   const group = new THREE.Group();
+  const refs = { group, numbers: [], signs: [], streets: [] };
+  const shift = (pos) => [pos[0] + ox, pos[1], pos[2] + oz];
   for (const item of data.items ?? []) {
-    const plaque = makePlaque(item.number, item.pos, item.n, { big: false });
+    const plaque = makePlaque(item.number, shift(item.pos), item.n, { big: false });
     labelState.numbers.push(plaque);
+    refs.numbers.push(plaque);
     group.add(plaque);
   }
   for (const sign of data.signs ?? []) {
-    const plaque = makePlaque(sign.street, sign.pos, sign.n, { big: true });
+    const plaque = makePlaque(sign.street, shift(sign.pos), sign.n, { big: true });
     labelState.signs.push(plaque);
+    refs.signs.push(plaque);
     group.add(plaque);
   }
 
@@ -257,7 +391,7 @@ function buildLabels(data) {
   const byStreet = new Map();
   for (const item of data.items ?? []) {
     if (!byStreet.has(item.street)) byStreet.set(item.street, []);
-    byStreet.get(item.street).push(item.pos);
+    byStreet.get(item.street).push(shift(item.pos));
   }
   for (const [street, positions] of byStreet) {
     if (positions.length < 2) continue; // losse adressen geen wijklabel
@@ -294,6 +428,7 @@ function updateLabelVisibility() {
   if (++labelTick % 30 !== 0) return;
   for (const m of labelState.numbers) m.visible = m.position.distanceToSquared(p) < 70 * 70;
   for (const m of labelState.signs) m.visible = m.position.distanceToSquared(p) < 220 * 220;
+  updateTiles(); // zelfde ritme (~2x/s): buurtegels streamen voor je ze ziet
 }
 
 // --- stijl / paletten -------------------------------------------------------
@@ -310,8 +445,10 @@ function applyPalette(name) {
   sun.intensity = p.sun.intensity;
   const el = THREE.MathUtils.degToRad(p.sun.elevation);
   const az = THREE.MathUtils.degToRad(p.sun.azimuth);
-  sun.position.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el))
-    .multiplyScalar(600).add(sun.target.position);
+  // offset t.o.v. de speler: de zon (en schaduwbox) reist mee over de tegels
+  state.sunOffset = new THREE.Vector3(
+    Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)
+  ).multiplyScalar(600);
 
   hemi.color.set(p.ambient.sky);
   hemi.groundColor.set(p.ambient.ground);
@@ -323,6 +460,15 @@ function applyPalette(name) {
   }
   document.querySelectorAll('#palettes button').forEach((b) =>
     b.classList.toggle('active', b.dataset.name === name));
+}
+
+function tintMeshes(meshes) {
+  const p = state.palettes[state.paletteName];
+  if (!p) return;
+  for (const m of meshes) {
+    const color = p.classes[m.userData.cls];
+    if (color) m.material.color.set(color);
+  }
 }
 
 function buildPaletteButtons() {
@@ -348,6 +494,7 @@ function setupControls() {
   const start = () => {
     overlay.classList.add('hidden');
     state.started = true;
+    setFly(true); // start vliegend: mooiste eerste beeld van de wijk
     if (isTouchDevice()) {
       // volledig scherm voelt als een echte app; mislukt stilletjes in PWA-modus
       document.documentElement.requestFullscreen?.().catch(() => {});
@@ -514,6 +661,10 @@ function tick() {
   camera.rotateY(state.yaw);
   camera.rotateX(state.pitch);
   sky.position.copy(camera.position);
+
+  // zon + schaduwbox reizen met de speler mee (nodig bij tile-streaming)
+  sun.target.position.set(camera.position.x, 0, camera.position.z);
+  if (state.sunOffset) sun.position.copy(sun.target.position).add(state.sunOffset);
   updateLabelVisibility();
 
   renderer.render(scene, camera);

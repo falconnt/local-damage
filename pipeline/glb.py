@@ -140,9 +140,11 @@ def write_glb(meshes: list[Mesh], out_path: str | Path, extras: dict | None = No
     return out_path
 
 
-def write_manifest(out_dir: str | Path, areas: list[dict]) -> Path:
-    """dist/tiles/index.json — welke gebieden er zijn en waar ze vandaan komen."""
+def write_manifest(out_dir: str | Path, areas: list[dict], regions: list[dict] | None = None) -> Path:
+    """dist/tiles/index.json — losse gebieden (areas) en streaming-regio's."""
     out = Path(out_dir) / "index.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"version": 1, "areas": areas}, indent=2))
+    out.write_text(
+        json.dumps({"version": 2, "areas": areas, "regions": regions or []}, indent=2)
+    )
     return out

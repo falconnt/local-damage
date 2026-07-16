@@ -1,0 +1,17 @@
+{
+  "name": "Local Damage",
+  "short_name": "Local Damage",
+  "description": "Wandelbare 3D-wereld uit Nederlandse open data (AHN + 3D BAG) in lowpoly diorama-stijl.",
+  "lang": "nl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1a1d2a",
+  "theme_color": "#3a3f75",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

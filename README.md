@@ -17,6 +17,12 @@ Daardoor kan dezelfde data-backend later ook Unity/Godot/Unreal voeden.
       gradient-skybox, fog, drie tijd-van-dag-paletten. CI bouwt en deployt
       naar GitHub Pages; een synthetische demo-wijk is de fallback als de
       open-data-endpoints haperen.
+- [x] **Stap 1b — mobile-first PWA.** Installeerbaar op Android (Chrome →
+      menu → *App installeren* / *Toevoegen aan startscherm*): manifest,
+      service worker (offline na eerste bezoek), app-iconen, touch-first
+      besturing (joystick-uitslag = looptempo), laadbalk, safe-area-UI.
+      Startwijk instelbaar per config; geocoding via PDOK Locatieserver
+      (default: Bosven, Veghel).
 - [ ] Stap 2 — quadtree-tiling + preloading; BGT/OSM-wegen en water.
 - [ ] Stap 3 — stylering verfijnen (tilt-shift DoF, bloom, grain, bomen);
       evt. overstap op 3D Tiles + `3d-tiles-renderer`.
@@ -34,9 +40,16 @@ python -m pipeline.build_area --synthetic --out dist/tiles
 python -m http.server 8000
 # open http://localhost:8000/viewer/
 
-# echte wijk bouwen (Delft binnenstad; vergt netwerk + rasterio/requests)
+# echte wijk bouwen (vergt netwerk + rasterio/requests)
 pip install -r pipeline/requirements.txt
-python -m pipeline.build_area --config data-sources/delft-centrum.json --out dist/tiles
+python -m pipeline.build_area --config data-sources/bosven-veghel.json --out dist/tiles
+```
+
+Een nieuw gebied toevoegen = één JSON'etje in `data-sources/` met een
+`locatieserver_query` (bv. `"Marktstraat, Uden"`) of een vaste `bbox_rd`,
+en de workflow draaien met die area-naam.
+
+```bash
 ```
 
 ## GitHub Pages activeren (eenmalig)

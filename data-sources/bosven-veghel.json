@@ -1,0 +1,16 @@
+{
+  "id": "bosven-veghel",
+  "name": "Bosven — Veghel ('t Ven West)",
+  "crs": "EPSG:28992",
+  "locatieserver_query": "Bosven, Veghel",
+  "size_m": 500,
+  "terrain": {
+    "source": "ahn_dtm",
+    "resolution_m": 2.0
+  },
+  "buildings": {
+    "source": "3dbag",
+    "lod": "2.2"
+  },
+  "notes": "Startwijk. Geen vaste bbox: de CI geocodeert de query via PDOK Locatieserver en centreert er size_m x size_m omheen."
+}

@@ -26,7 +26,8 @@ const state = {
 
 // --- renderer / scene ------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// telefoons met DPR 3 renderen anders 9x zoveel pixels; 1.75 is daar zat
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice() ? 1.75 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = !isTouchDevice();
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -90,9 +91,21 @@ async function init() {
 
   const { base, manifest } = await findManifest();
   const area = manifest.areas[manifest.areas.length - 1]; // nieuwste gebied
-  document.getElementById('area-name').textContent = area.name;
+  document.getElementById('area-name').textContent = `${area.name} — laden…`;
 
-  const gltf = await new GLTFLoader().loadAsync(base + area.file);
+  // laadbalk: GLB's van echte wijken zijn 10-20 MB, op mobiel duurt dat even
+  const progressBar = document.querySelector('#progress .bar');
+  const gltf = await new GLTFLoader().loadAsync(base + area.file, (evt) => {
+    if (evt.total > 0) {
+      progressBar.style.width = `${Math.round((evt.loaded / evt.total) * 100)}%`;
+    } else {
+      progressBar.style.width = '100%';
+      document.getElementById('area-name').textContent =
+        `${area.name} — ${(evt.loaded / 1e6).toFixed(1)} MB geladen…`;
+    }
+  });
+  document.getElementById('area-name').textContent = area.name;
+  document.getElementById('progress').classList.add('hidden');
   const worldBounds = new THREE.Box3();
   gltf.scene.traverse((node) => {
     if (!node.isMesh) return;
@@ -188,14 +201,24 @@ function buildPaletteButtons() {
 // --- besturing --------------------------------------------------------------
 function setupControls() {
   const overlay = document.getElementById('overlay');
-  if (isTouchDevice()) document.getElementById('start-hint').textContent =
-    'tik om te lopen — linkerduim = bewegen · rechterduim = kijken';
+  const startBtn = document.getElementById('start-btn');
+  document.getElementById('start-hint').textContent = isTouchDevice()
+    ? 'linkerduim = lopen (verder duwen = rennen) · rechterduim = rondkijken'
+    : 'WASD/pijltjes = bewegen · muis = kijken · shift = rennen · esc = menu';
+  startBtn.style.display = 'inline-block';
 
-  overlay.addEventListener('click', () => {
+  const start = () => {
     overlay.classList.add('hidden');
     state.started = true;
-    if (!isTouchDevice()) renderer.domElement.requestPointerLock();
-  });
+    if (isTouchDevice()) {
+      // volledig scherm voelt als een echte app; mislukt stilletjes in PWA-modus
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      renderer.domElement.requestPointerLock();
+    }
+  };
+  startBtn.addEventListener('click', (e) => { e.stopPropagation(); start(); });
+  overlay.addEventListener('click', start);
   document.addEventListener('pointerlockchange', () => {
     if (!document.pointerLockElement && state.started && !isTouchDevice()) {
       overlay.classList.remove('hidden'); // esc -> menu terug
@@ -287,7 +310,12 @@ function tick() {
     const strafe = (state.keys.has('KeyD') || state.keys.has('ArrowRight') ? 1 : 0)
       - (state.keys.has('KeyA') || state.keys.has('ArrowLeft') ? 1 : 0)
       + state.joystick.x;
-    const speed = state.keys.has('ShiftLeft') || state.keys.has('ShiftRight') ? RUN_SPEED : WALK_SPEED;
+    // toetsenbord: shift = rennen; joystick: uitslag bepaalt tempo (rand = rennen)
+    let speed = state.keys.has('ShiftLeft') || state.keys.has('ShiftRight') ? RUN_SPEED : WALK_SPEED;
+    if (state.joystick.active) {
+      const deflection = Math.min(1, Math.hypot(state.joystick.x, state.joystick.y));
+      speed = WALK_SPEED + (RUN_SPEED - WALK_SPEED) * Math.max(0, (deflection - 0.55) / 0.45);
+    }
 
     const dir = new THREE.Vector3(
       Math.sin(state.yaw) * -fwd + Math.cos(state.yaw) * strafe,

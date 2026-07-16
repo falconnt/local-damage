@@ -12,7 +12,7 @@ on:
     inputs:
       area:
         description: "gebieds-config in data-sources/ (zonder .json)"
-        default: "delft-centrum"
+        default: "bosven-veghel"
 
 permissions:
   contents: read
@@ -48,7 +48,7 @@ jobs:
         id: realbuild
         continue-on-error: true
         run: |
-          AREA="${{ github.event.inputs.area || 'delft-centrum' }}"
+          AREA="${{ github.event.inputs.area || 'bosven-veghel' }}"
           python -m pipeline.build_area --config "data-sources/${AREA}.json" --out site/tiles --cache .cache
 
       - name: Report fallback

@@ -2,10 +2,18 @@
 <html lang="nl">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Local Damage — wandelbare 3D-wereld uit Nederlandse open data</title>
+  <meta name="theme-color" content="#3a3f75" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d2a; font-family: system-ui, -apple-system, sans-serif; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d2a; font-family: system-ui, -apple-system, sans-serif;
+      overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
     #app { position: fixed; inset: 0; }
     canvas { display: block; touch-action: none; }
 
@@ -21,23 +29,37 @@
     #overlay h1 { font-size: clamp(1.6rem, 5vw, 2.6rem); letter-spacing: 0.35em; font-weight: 300; margin: 0; }
     #overlay p { opacity: 0.85; max-width: 34rem; line-height: 1.5; margin: 0.2rem 0; }
     #overlay .hint { font-size: 0.85rem; opacity: 0.6; }
+    #overlay img.appicon { width: 84px; height: 84px; border-radius: 20px; box-shadow: 0 6px 24px rgba(0,0,0,0.45); }
     #overlay.hidden, .hidden { display: none !important; }
 
-    #hud { position: fixed; top: 0.7rem; left: 0.9rem; z-index: 5; color: rgba(255,255,255,0.9);
+    #progress { width: min(70vw, 20rem); height: 5px; border-radius: 999px; background: rgba(255,255,255,0.18); overflow: hidden; }
+    #progress .bar { height: 100%; width: 0%; background: #ffb27d; border-radius: 999px; transition: width 0.2s; }
+    #start-btn { margin-top: 0.4rem; border: 0; border-radius: 999px; padding: 0.9rem 2.6rem; font-size: 1.05rem;
+      background: #ffb27d; color: #1a1d2a; font-weight: 600; cursor: pointer; display: none; }
+    #start-btn:active { transform: scale(0.97); }
+
+    #hud { position: fixed; top: calc(0.7rem + env(safe-area-inset-top)); left: calc(0.9rem + env(safe-area-inset-left));
+      z-index: 5; color: rgba(255,255,255,0.9);
       font-size: 0.8rem; letter-spacing: 0.25em; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
-    #palettes { position: fixed; top: 0.6rem; right: 0.7rem; z-index: 5; display: flex; gap: 0.4rem; }
+    #palettes { position: fixed; top: calc(0.6rem + env(safe-area-inset-top)); right: calc(0.7rem + env(safe-area-inset-right));
+      z-index: 5; display: flex; gap: 0.4rem; }
     #palettes button { border: 1px solid rgba(255,255,255,0.35); background: rgba(20,22,38,0.55);
-      color: #fff; padding: 0.35rem 0.7rem; border-radius: 999px; font-size: 0.75rem; cursor: pointer; }
+      color: #fff; padding: 0.55rem 0.9rem; border-radius: 999px; font-size: 0.8rem; cursor: pointer; min-height: 2.4rem; }
     #palettes button.active { background: rgba(255,255,255,0.85); color: #1a1d2a; }
 
-    #footer { position: fixed; bottom: 0.45rem; left: 0; right: 0; z-index: 5; text-align: center;
-      color: rgba(255,255,255,0.55); font-size: 0.65rem; pointer-events: none; padding: 0 1rem; }
+    #footer { position: fixed; bottom: calc(0.45rem + env(safe-area-inset-bottom)); left: 0; right: 0; z-index: 5;
+      text-align: center; color: rgba(255,255,255,0.55); font-size: 0.65rem; pointer-events: none; padding: 0 1rem; }
     #footer a { color: rgba(255,255,255,0.75); pointer-events: auto; }
 
-    #joystick { position: fixed; z-index: 6; width: 110px; height: 110px; border-radius: 50%;
+    #joystick { position: fixed; z-index: 6; width: 130px; height: 130px; border-radius: 50%;
       border: 2px solid rgba(255,255,255,0.35); display: none; pointer-events: none; }
-    #joystick .knob { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; border-radius: 50%;
+    #joystick .knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%;
       background: rgba(255,255,255,0.45); transform: translate(-50%, -50%); }
+
+    @media (max-width: 600px) {
+      #footer { font-size: 0.55rem; }
+      #overlay .hint { font-size: 0.8rem; }
+    }
   </style>
 </head>
 <body>
@@ -49,9 +71,12 @@
   <div id="palettes"></div>
 
   <div id="overlay">
+    <img class="appicon" src="./icons/icon-192.png" alt="" />
     <h1>LOCAL DAMAGE</h1>
     <p id="area-name">wereld laden…</p>
-    <p class="hint" id="start-hint">klik om te lopen — WASD/pijltjes = bewegen · muis = kijken · shift = rennen · esc = menu</p>
+    <div id="progress"><div class="bar"></div></div>
+    <button id="start-btn" type="button">start wandeling</button>
+    <p class="hint" id="start-hint"></p>
   </div>
 
   <div id="joystick"><div class="knob"></div></div>
@@ -71,5 +96,10 @@
     }
   </script>
   <script type="module" src="./main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+    }
+  </script>
 </body>
 </html>

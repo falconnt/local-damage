@@ -57,7 +57,16 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
 
     config = json.loads(config_path.read_text())
     area_id = config["id"]
-    bbox = [float(v) for v in config["bbox_rd"]]
+    if "bbox_rd" in config:
+        bbox = [float(v) for v in config["bbox_rd"]]
+    elif "locatieserver_query" in config:
+        from . import geocode
+
+        x, y, naam = geocode.geocode_rd(config["locatieserver_query"])
+        bbox = geocode.bbox_around(x, y, float(config.get("size_m", 500)))
+        log.info("gebied %s gecentreerd op %s", area_id, naam)
+    else:
+        raise ValueError(f"config {area_id} heeft bbox_rd noch locatieserver_query")
     res = float(config.get("terrain", {}).get("resolution_m", 2.0))
     origin = np.array([bbox[0], bbox[1]], dtype=np.float64)
     size_x, size_y = bbox[2] - bbox[0], bbox[3] - bbox[1]

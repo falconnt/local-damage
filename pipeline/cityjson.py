@@ -103,6 +103,7 @@ def parse_city_objects(
     origin: np.ndarray,
     surface_types: list[dict] | None = None,
     ground_sampler=None,
+    clip_bounds: tuple[float, float, float, float] | None = None,
 ) -> int:
     """Voeg alle Building(Part)-geometrie toe aan de soup. Returnt #faces.
 
@@ -140,6 +141,14 @@ def parse_city_objects(
         if not faces:
             continue
 
+        if clip_bounds is not None:
+            # de API levert per tegel (ruimer dan gevraagd): clip op centroid
+            pts2d = np.concatenate([ring for _, ring in faces])[:, :2]
+            cx, cy = pts2d.mean(axis=0)
+            minx, miny, maxx, maxy = clip_bounds
+            if not (minx - 2 <= cx <= maxx + 2 and miny - 2 <= cy <= maxy + 2):
+                continue
+
         if ground_sampler is not None:
             pts = np.concatenate([ring for _, ring in faces])
             base_z = float(pts[:, 2].min())
@@ -162,6 +171,7 @@ def features_to_soup(
     features: list[dict],
     origin_rd: np.ndarray,
     ground_sampler=None,
+    clip_bounds: tuple[float, float, float, float] | None = None,
 ) -> TriangleSoup:
     """CityJSONFeatures van api.3dbag.nl -> TriangleSoup in lokale coordinaten."""
     soup = TriangleSoup()
@@ -180,7 +190,8 @@ def features_to_soup(
         if vertices.size == 0:
             continue
         total_faces += parse_city_objects(
-            city_objects, vertices, soup, origin, ground_sampler=ground_sampler
+            city_objects, vertices, soup, origin,
+            ground_sampler=ground_sampler, clip_bounds=clip_bounds,
         )
 
     log.info("gebouwen geparsed: %d faces", total_faces)

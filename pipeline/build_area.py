@@ -102,7 +102,10 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
     # 2) gebouwen (3D BAG LoD2.2), gesnapt op het terrein tegen zwevende huizen
     metadata, features = fetch_3dbag.fetch_buildings(bbox, cache_dir / area_id)
     log.info("3dbag: %d features", len(features))
-    soup = cityjson.features_to_soup(metadata, features, origin, ground_sampler=ground)
+    soup = cityjson.features_to_soup(
+        metadata, features, origin,
+        ground_sampler=ground, clip_bounds=(0.0, 0.0, size_x, size_y),
+    )
     n_tris = sum(len(v) for v in soup.triangles.values())
     if n_tris == 0:
         # een echte wijk zonder één gebouw is vrijwel zeker een fetch/parse-bug;

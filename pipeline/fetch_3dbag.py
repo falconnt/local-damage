@@ -22,6 +22,10 @@ API_BASE = "https://api.3dbag.nl"
 COLLECTION = "pand"
 PAGE_LIMIT = 100
 MAX_PAGES = 200  # veiligheidsklep: ~20k gebouwen is ruim genoeg voor 1 wijk
+# De API selecteert in de praktijk per interne tegel: een strak bbox-verzoek
+# kan hele stukken van de wijk missen. Daarom vragen we ruimer op en clippen
+# we client-side op footprint-centroid (zie cityjson.parse_city_objects).
+EXPAND_M = 300.0
 
 
 def _bbox_variants(bbox_rd: list[float]) -> list[tuple[str, dict]]:
@@ -55,6 +59,13 @@ def fetch_buildings(bbox_rd: list[float], cache_dir: str | Path) -> tuple[dict, 
     session = requests.Session()
     session.headers["User-Agent"] = "local-damage-pipeline/0.1 (+github.com/falconnt/local-damage)"
     url = f"{API_BASE}/collections/{COLLECTION}/items"
+
+    bbox_rd = [
+        bbox_rd[0] - EXPAND_M,
+        bbox_rd[1] - EXPAND_M,
+        bbox_rd[2] + EXPAND_M,
+        bbox_rd[3] + EXPAND_M,
+    ]
 
     # eerste pagina: bbox-varianten proberen tot er features komen
     params: dict | None = None

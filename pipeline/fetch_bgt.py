@@ -32,11 +32,13 @@ PAGE_LIMIT = 1000
 MAX_PAGES = 20
 
 
-def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, list[np.ndarray]]:
-    """Per klasse een lijst ringen (elke ring (N,2) in RD; gaten inbegrepen).
+def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, list[list[np.ndarray]]]:
+    """Per klasse een lijst POLYGONEN; elke polygoon is [buitenring, gat, ...].
 
-    Gaten worden als aparte ringen teruggegeven: de even-odd puntentest in
-    terrain.classify werkt correct met buiten- en binnenringen samen.
+    De polygoonstructuur blijft behouden: de classificatie neemt de UNIE over
+    polygonen (met even-odd alleen binnen een polygoon voor gaten). Ringen
+    plat samengooien zou overlappende/dubbele vlakken tegen elkaar laten
+    wegvallen — dan verdwijnen hele vijvers.
     """
     cache = Path(cache_dir)
     cache.mkdir(parents=True, exist_ok=True)
@@ -44,10 +46,11 @@ def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, lis
     session.headers["User-Agent"] = "local-damage-pipeline/0.1"
 
     bbox_wgs = ",".join(f"{v:.7f}" for v in rd_bbox_to_wgs84(bbox_rd))
-    result: dict[str, list[np.ndarray]] = {}
+    result: dict[str, list[list[np.ndarray]]] = {}
 
     for collection, cls in COLLECTIONS.items():
-        rings: list[np.ndarray] = []
+        polygons: list[list[np.ndarray]] = []
+        n_feats = 0
         url = f"{API_BASE}/collections/{collection}/items"
         params: dict | None = {"bbox": bbox_wgs, "limit": PAGE_LIMIT, "f": "json"}
         for page in range(MAX_PAGES):
@@ -59,33 +62,37 @@ def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, lis
                 rel = props.get("relatieve_hoogteligging", props.get("relatieveHoogteligging", 0))
                 if rel not in (0, "0", None):
                     continue
-                rings.extend(_geometry_rings(feat.get("geometry") or {}))
+                n_feats += 1
+                polygons.extend(_geometry_polygons(feat.get("geometry") or {}))
             next_url = _next_link(data)
             if not next_url:
                 break
             url, params = next_url, None
-        log.info("bgt %s: %d ringen", collection, len(rings))
-        result[cls] = rings
+        log.info("bgt %s: %d features, %d polygonen", collection, n_feats, len(polygons))
+        result[cls] = polygons
 
     return result
 
 
-def _geometry_rings(geometry: dict) -> list[np.ndarray]:
+def _geometry_polygons(geometry: dict) -> list[list[np.ndarray]]:
     gtype = geometry.get("type")
     coords = geometry.get("coordinates") or []
-    polygons = []
+    raw_polys = []
     if gtype == "Polygon":
-        polygons = [coords]
+        raw_polys = [coords]
     elif gtype == "MultiPolygon":
-        polygons = coords
-    rings = []
-    for poly in polygons:
+        raw_polys = coords
+    polygons = []
+    for poly in raw_polys:
+        rings = []
         for ring in poly:  # buitenring + gaten
             arr = np.asarray([c[:2] for c in ring], dtype=np.float64)
             if len(arr) < 3:
                 continue
             rings.append(_to_rd(arr))
-    return rings
+        if rings:
+            polygons.append(rings)
+    return polygons
 
 
 def _to_rd(ring: np.ndarray) -> np.ndarray:

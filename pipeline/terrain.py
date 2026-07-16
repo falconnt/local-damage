@@ -130,20 +130,26 @@ def normals_grid(heights: np.ndarray, resolution_m: float) -> np.ndarray:
     return n
 
 
-def _points_in_rings(points: np.ndarray, rings: list[np.ndarray]) -> np.ndarray:
-    """Even-odd puntentest over alle ringen samen (gaten werken vanzelf)."""
+def _points_in_polygon(points: np.ndarray, rings: list[np.ndarray]) -> np.ndarray:
+    """Even-odd puntentest binnen EEN polygoon (buitenring + gaten).
+
+    Alleen binnen een polygoon mag even-odd over de ringen XOR'en (zo werken
+    gaten); over verschillende polygonen heen moet de UNIE genomen worden,
+    anders vallen overlappende vlakken tegen elkaar weg.
+    """
     inside = np.zeros(len(points), dtype=bool)
     px, py = points[:, 0], points[:, 1]
+    # bbox-voorfilter op de buitenring houdt het snel bij veel kleine vlakken
+    outer = rings[0]
+    sel = (
+        (px >= outer[:, 0].min()) & (px <= outer[:, 0].max())
+        & (py >= outer[:, 1].min()) & (py <= outer[:, 1].max())
+    )
+    if not sel.any():
+        return inside
+    sx, sy = px[sel], py[sel]
+    hit = np.zeros(len(sx), dtype=bool)
     for ring in rings:
-        # bbox-voorfilter houdt het snel bij veel kleine vlakken
-        sel = (
-            (px >= ring[:, 0].min()) & (px <= ring[:, 0].max())
-            & (py >= ring[:, 1].min()) & (py <= ring[:, 1].max())
-        )
-        if not sel.any():
-            continue
-        sx, sy = px[sel], py[sel]
-        hit = np.zeros(len(sx), dtype=bool)
         x1s, y1s = ring[:, 0], ring[:, 1]
         x2s, y2s = np.roll(x1s, -1), np.roll(y1s, -1)
         for x1, y1, x2, y2 in zip(x1s, y1s, x2s, y2s):
@@ -153,17 +159,21 @@ def _points_in_rings(points: np.ndarray, rings: list[np.ndarray]) -> np.ndarray:
             with np.errstate(divide="ignore", invalid="ignore"):
                 xcross = (x2 - x1) * (sy - y1) / (y2 - y1) + x1
             hit ^= crosses & (sx < xcross)
-        inside[sel] ^= hit
+    inside[sel] = hit
     return inside
 
 
 def classify_cells(
-    heights: np.ndarray, resolution_m: float, surfaces: dict[str, list[np.ndarray]], origin: np.ndarray
+    heights: np.ndarray,
+    resolution_m: float,
+    surfaces: dict[str, list[list[np.ndarray]]],
+    origin: np.ndarray,
 ) -> dict[str, np.ndarray]:
     """Per klasse een boolmasker (rows-1, cols-1) van gridcellen in die vlakken.
 
-    surfaces: klasse -> ringen in absolute RD-coordinaten. Volgorde van
-    prioriteit: water wint van road, road wint van sand.
+    surfaces: klasse -> lijst polygonen ([buitenring, gat, ...]) in absolute
+    RD-coordinaten. Binnen een klasse geldt de unie over de polygonen;
+    tussen klassen prioriteit: water > road > sand > green.
     """
     rows, cols = heights.shape
     cy, cx = np.mgrid[0 : rows - 1, 0 : cols - 1]
@@ -176,10 +186,13 @@ def classify_cells(
     masks: dict[str, np.ndarray] = {}
     claimed = np.zeros(len(centers), dtype=bool)
     for cls in ("water", "road", "sand", "green"):  # prioriteitsvolgorde
-        rings = surfaces.get(cls) or []
-        if not rings:
+        polygons = surfaces.get(cls) or []
+        if not polygons:
             continue
-        inside = _points_in_rings(centers, rings) & ~claimed
+        inside = np.zeros(len(centers), dtype=bool)
+        for rings in polygons:
+            inside |= _points_in_polygon(centers, rings)
+        inside &= ~claimed
         claimed |= inside
         masks[cls] = inside.reshape(rows - 1, cols - 1)
     return masks

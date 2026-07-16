@@ -55,17 +55,20 @@ jobs:
         if: steps.realbuild.outcome == 'failure'
         run: echo "::warning::Open-data-build mislukt — site deployt met synthetische demo-wijk. Zie cache-artifact voor de ruwe API-antwoorden."
 
-      # tiles ook naar een data-branch: reviewbaar/clonebaar zonder Pages
+      # tiles ook naar een data-branch: reviewbaar/clonebaar zonder Pages.
+      # de ruwe API-cache gaat mee (alleen in de branch, niet naar Pages).
       - name: Publish tiles to tiles-data branch
         if: steps.realbuild.outcome == 'success'
         run: |
           cd site/tiles
+          mkdir -p _debug && cp -r ../../.cache/* _debug/ 2>/dev/null || true
           git init -q -b tiles-data
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -qm "tiles van ${GITHUB_SHA}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" tiles-data
+          rm -rf _debug .git
 
       - name: Upload fetch cache for debugging
         if: always()

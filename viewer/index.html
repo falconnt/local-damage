@@ -56,6 +56,19 @@
     #joystick .knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%;
       background: rgba(255,255,255,0.45); transform: translate(-50%, -50%); }
 
+    #fly-btn { position: fixed; right: calc(0.8rem + env(safe-area-inset-right));
+      bottom: calc(2.2rem + env(safe-area-inset-bottom)); z-index: 6;
+      width: 3.2rem; height: 3.2rem; border-radius: 50%; font-size: 1.4rem;
+      border: 1px solid rgba(255,255,255,0.35); background: rgba(20,22,38,0.55); color: #fff; cursor: pointer; }
+    #fly-btn.active { background: rgba(255,178,125,0.9); }
+    #fly-vert { position: fixed; right: calc(0.8rem + env(safe-area-inset-right));
+      bottom: calc(6rem + env(safe-area-inset-bottom)); z-index: 6;
+      display: none; flex-direction: column; gap: 0.5rem; }
+    #fly-vert.visible { display: flex; }
+    #fly-vert button { width: 3.2rem; height: 3.2rem; border-radius: 50%; font-size: 1.1rem;
+      border: 1px solid rgba(255,255,255,0.35); background: rgba(20,22,38,0.55); color: #fff;
+      touch-action: none; -webkit-user-select: none; user-select: none; }
+
     @media (max-width: 600px) {
       #footer { font-size: 0.55rem; }
       #overlay .hint { font-size: 0.8rem; }
@@ -80,6 +93,12 @@
   </div>
 
   <div id="joystick"><div class="knob"></div></div>
+
+  <button id="fly-btn" type="button" title="vliegen/lopen (F)">🪂</button>
+  <div id="fly-vert">
+    <button id="fly-up" type="button">▲</button>
+    <button id="fly-down" type="button">▼</button>
+  </div>
 
   <div id="footer">
     hoogte: <a href="https://www.ahn.nl" target="_blank" rel="noopener">AHN</a> via PDOK ·

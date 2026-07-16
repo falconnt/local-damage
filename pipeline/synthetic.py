@@ -137,3 +137,18 @@ def synthetic_overlays(heights: np.ndarray, resolution_m: float, size_m: float) 
     )
     soup.add_polygon("water", ring)
     return soup
+
+
+def synthetic_tree_positions(size_m: float, seed: int = 33) -> np.ndarray:
+    """Parkje in de noordoosthoek + laanbomen langs de hoofdstraat."""
+    rng = np.random.default_rng(seed)
+    park = rng.uniform([size_m * 0.62, size_m * 0.68], [size_m * 0.95, size_m * 0.95], (60, 2))
+    lane_y = np.arange(20.0, size_m - 20.0, 14.0)
+    lane = np.concatenate(
+        [
+            np.column_stack([np.full_like(lane_y, size_m * 0.18 - 9), lane_y]),
+            np.column_stack([np.full_like(lane_y, size_m * 0.18 + 9), lane_y]),
+        ]
+    )
+    lane += rng.uniform(-1.5, 1.5, lane.shape)
+    return np.concatenate([park, lane])

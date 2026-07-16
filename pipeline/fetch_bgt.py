@@ -26,6 +26,7 @@ COLLECTIONS = {
     "wegdeel": "road",
     "waterdeel": "water",
     "onbegroeidterreindeel": "sand",
+    "begroeidterreindeel": "green",  # parken/plantsoenen: iets dieper groen + bomen
 }
 PAGE_LIMIT = 1000
 MAX_PAGES = 20

@@ -15,7 +15,7 @@ on:
         default: "bosven-veghel"
 
 permissions:
-  contents: read
+  contents: write  # voor de tiles-data branch
   pages: write
   id-token: write
 
@@ -54,6 +54,18 @@ jobs:
       - name: Report fallback
         if: steps.realbuild.outcome == 'failure'
         run: echo "::warning::Open-data-build mislukt — site deployt met synthetische demo-wijk. Zie cache-artifact voor de ruwe API-antwoorden."
+
+      # tiles ook naar een data-branch: reviewbaar/clonebaar zonder Pages
+      - name: Publish tiles to tiles-data branch
+        if: steps.realbuild.outcome == 'success'
+        run: |
+          cd site/tiles
+          git init -q -b tiles-data
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "tiles van ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" tiles-data
 
       - name: Upload fetch cache for debugging
         if: always()

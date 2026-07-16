@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import cityjson, glb, synthetic, terrain
+from . import cityjson, glb, synthetic, terrain, trees
 from .meshes import TriangleSoup, soup_to_flat_mesh
 
 log = logging.getLogger("build_area")
@@ -39,6 +39,8 @@ def build_synthetic(out_dir: Path) -> dict:
 
     label_data = labels.place_labels(addresses, soup, ground)
     (out_dir / "demo-addresses.json").write_text(json.dumps(label_data))
+
+    trees.plant_trees(soup, synthetic.synthetic_tree_positions(SYNTHETIC_SIZE_M), ground)
 
     overlays = synthetic.synthetic_overlays(heights, SYNTHETIC_RES_M, SYNTHETIC_SIZE_M)
     for cls, tris in overlays.triangles.items():
@@ -117,6 +119,12 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
     except Exception as exc:  # noqa: BLE001 — bewuste fallback, wijk blijft bruikbaar
         log.warning("BGT-ondergronden overgeslagen: %s", exc)
 
+    # 3b) bomen op begroeid terrein (procedureel, geen open bomendataset)
+    if "green" in surface_masks:
+        rng = np.random.default_rng(21)
+        positions = trees.positions_from_mask(surface_masks["green"], res, rng)
+        trees.plant_trees(soup, positions, ground)
+
     # 4) adressen uit de BAG -> bordjes-JSON (tolerant)
     addresses_file = None
     try:
@@ -162,7 +170,7 @@ def assemble_meshes(
 
     if surface_masks:
         normals = terrain.normals_grid(heights, resolution_m)
-        lifts = {"sand": 0.03, "road": 0.06, "water": -0.25}
+        lifts = {"sand": 0.03, "road": 0.06, "water": -0.25, "green": 0.02}
         for cls, mask in surface_masks.items():
             mesh = terrain.overlay_from_mask(
                 heights, resolution_m, mask, cls, lifts.get(cls, 0.05), normals
@@ -171,7 +179,7 @@ def assemble_meshes(
                 meshes.append(mesh)
                 log.info("ondergrond %s: %d cellen", cls, int(mask.sum()))
 
-    for cls in ("roof", "wall", "ground", "road", "water", "sand"):
+    for cls in ("roof", "wall", "ground", "road", "water", "sand", "tree", "trunk"):
         mesh = soup_to_flat_mesh(soup, cls)
         if mesh is not None:
             meshes.append(mesh)

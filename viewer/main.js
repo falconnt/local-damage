@@ -9,6 +9,8 @@ const TILE_PATHS = ['tiles/', '../dist/tiles/']; // Pages-layout, daarna lokale 
 const EYE_HEIGHT = 1.7;
 const WALK_SPEED = 5.0;
 const RUN_SPEED = 11.0;
+const FLY_SPEED = 22.0;
+const FLY_FAST = 45.0;
 
 const state = {
   paletteName: 'sunset',
@@ -22,6 +24,8 @@ const state = {
   walkables: [],
   classMeshes: new Map(),
   started: false,
+  fly: false,
+  flyVert: 0, // -1/0/+1 via mobiele knoppen
 };
 
 // --- renderer / scene ------------------------------------------------------
@@ -121,7 +125,7 @@ async function init() {
       vertexColors: Boolean(node.geometry.getAttribute('color')),
     });
     node.userData.cls = cls;
-    node.castShadow = cls === 'roof' || cls === 'wall';
+    node.castShadow = cls === 'roof' || cls === 'wall' || cls === 'tree' || cls === 'trunk';
     node.receiveShadow = true;
     state.classMeshes.set(cls, [...(state.classMeshes.get(cls) ?? []), node]);
     if (cls === 'grass' || cls === 'road' || cls === 'ground') state.walkables.push(node);
@@ -281,8 +285,8 @@ function setupControls() {
   const overlay = document.getElementById('overlay');
   const startBtn = document.getElementById('start-btn');
   document.getElementById('start-hint').textContent = isTouchDevice()
-    ? 'linkerduim = lopen (verder duwen = rennen) · rechterduim = rondkijken'
-    : 'WASD/pijltjes = bewegen · muis = kijken · shift = rennen · esc = menu';
+    ? 'linkerduim = lopen (verder duwen = rennen) · rechterduim = rondkijken · 🪂 = vliegen'
+    : 'WASD = bewegen · muis = kijken · shift = rennen · F = vliegen (spatie/C = stijgen/dalen)';
   startBtn.style.display = 'inline-block';
 
   const start = () => {
@@ -297,6 +301,26 @@ function setupControls() {
   };
   startBtn.addEventListener('click', (e) => { e.stopPropagation(); start(); });
   overlay.addEventListener('click', start);
+
+  // vliegmodus: knop (mobiel + desktop) of F-toets
+  const flyBtn = document.getElementById('fly-btn');
+  const flyVert = document.getElementById('fly-vert');
+  const setFly = (on) => {
+    state.fly = on;
+    flyBtn.classList.toggle('active', on);
+    flyBtn.textContent = on ? '🚶' : '🪂';
+    flyVert.classList.toggle('visible', on && isTouchDevice());
+    if (!on) state.flyVert = 0;
+  };
+  flyBtn.addEventListener('click', (e) => { e.stopPropagation(); setFly(!state.fly); });
+  document.addEventListener('keydown', (e) => { if (e.code === 'KeyF' && state.started) setFly(!state.fly); });
+  for (const [id, dir] of [['fly-up', 1], ['fly-down', -1]]) {
+    const btn = document.getElementById(id);
+    btn.addEventListener('pointerdown', (e) => { e.preventDefault(); state.flyVert = dir; });
+    for (const evt of ['pointerup', 'pointercancel', 'pointerleave']) {
+      btn.addEventListener(evt, () => { state.flyVert = 0; });
+    }
+  }
   document.addEventListener('pointerlockchange', () => {
     if (!document.pointerLockElement && state.started && !isTouchDevice()) {
       overlay.classList.remove('hidden'); // esc -> menu terug
@@ -389,25 +413,44 @@ function tick() {
       - (state.keys.has('KeyA') || state.keys.has('ArrowLeft') ? 1 : 0)
       + state.joystick.x;
     // toetsenbord: shift = rennen; joystick: uitslag bepaalt tempo (rand = rennen)
-    let speed = state.keys.has('ShiftLeft') || state.keys.has('ShiftRight') ? RUN_SPEED : WALK_SPEED;
+    const shift = state.keys.has('ShiftLeft') || state.keys.has('ShiftRight');
+    let speed = state.fly ? (shift ? FLY_FAST : FLY_SPEED) : (shift ? RUN_SPEED : WALK_SPEED);
     if (state.joystick.active) {
       const deflection = Math.min(1, Math.hypot(state.joystick.x, state.joystick.y));
-      speed = WALK_SPEED + (RUN_SPEED - WALK_SPEED) * Math.max(0, (deflection - 0.55) / 0.45);
+      const lo = state.fly ? FLY_SPEED : WALK_SPEED;
+      const hi = state.fly ? FLY_FAST : RUN_SPEED;
+      speed = lo + (hi - lo) * Math.max(0, (deflection - 0.55) / 0.45);
     }
 
-    const dir = new THREE.Vector3(
-      Math.sin(state.yaw) * -fwd + Math.cos(state.yaw) * strafe,
-      0,
-      Math.cos(state.yaw) * -fwd - Math.sin(state.yaw) * strafe
-    );
-    if (dir.lengthSq() > 1) dir.normalize();
-    camera.position.addScaledVector(dir, speed * dt);
+    if (state.fly) {
+      // vliegen: vooruit = kijkrichting (incl. omhoog/omlaag kijken)
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const right = new THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
+      const move = forward.multiplyScalar(fwd).addScaledVector(right, strafe);
+      const vert = state.flyVert
+        + (state.keys.has('Space') ? 1 : 0)
+        - (state.keys.has('KeyC') ? 1 : 0);
+      move.y += vert * 0.9;
+      if (move.lengthSq() > 1) move.normalize();
+      camera.position.addScaledVector(move, speed * dt);
+      const ground = groundHeight(camera.position.x, camera.position.z);
+      if (ground !== null && camera.position.y < ground + 0.6) camera.position.y = ground + 0.6;
+    } else {
+      const dir = new THREE.Vector3(
+        Math.sin(state.yaw) * -fwd + Math.cos(state.yaw) * strafe,
+        0,
+        Math.cos(state.yaw) * -fwd - Math.sin(state.yaw) * strafe
+      );
+      if (dir.lengthSq() > 1) dir.normalize();
+      camera.position.addScaledVector(dir, speed * dt);
 
-    const ground = groundHeight(camera.position.x, camera.position.z);
-    if (ground !== null) {
-      // zachte verticale interpolatie: geen harde hobbels op mesh-randen
-      const target = ground + EYE_HEIGHT;
-      camera.position.y += (target - camera.position.y) * Math.min(1, dt * 12);
+      const ground = groundHeight(camera.position.x, camera.position.z);
+      if (ground !== null) {
+        // zachte verticale interpolatie: geen harde hobbels op mesh-randen
+        const target = ground + EYE_HEIGHT;
+        camera.position.y += (target - camera.position.y) * Math.min(1, dt * 12);
+      }
     }
   }
 

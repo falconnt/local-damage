@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 # Klassen die we semantisch onderscheiden; de client kleurt per klasse.
-CLASSES = ("grass", "roof", "wall", "ground", "road", "water", "sand")
+CLASSES = ("grass", "roof", "wall", "ground", "road", "water", "sand", "green", "tree", "trunk")
 
 
 @dataclass

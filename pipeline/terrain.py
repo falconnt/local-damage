@@ -175,7 +175,7 @@ def classify_cells(
     )
     masks: dict[str, np.ndarray] = {}
     claimed = np.zeros(len(centers), dtype=bool)
-    for cls in ("water", "road", "sand"):  # prioriteitsvolgorde
+    for cls in ("water", "road", "sand", "green"):  # prioriteitsvolgorde
         rings = surfaces.get(cls) or []
         if not rings:
             continue

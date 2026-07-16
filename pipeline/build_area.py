@@ -81,7 +81,11 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
     soup = cityjson.features_to_soup(metadata, features, origin)
     n_tris = sum(len(v) for v in soup.triangles.values())
     if n_tris == 0:
-        log.warning("geen gebouw-geometrie geparsed — controleer cache-JSON in %s", cache_dir / area_id)
+        # een echte wijk zonder één gebouw is vrijwel zeker een fetch/parse-bug;
+        # liever falen (CI valt terug op de demo) dan een lege wereld deployen
+        raise RuntimeError(
+            f"geen gebouw-geometrie voor {area_id} — controleer cache-JSON in {cache_dir / area_id}"
+        )
 
     meshes = assemble_meshes(heights, res, soup)
     out = glb.write_glb(

@@ -24,6 +24,29 @@ PAGE_LIMIT = 100
 MAX_PAGES = 200  # veiligheidsklep: ~20k gebouwen is ruim genoeg voor 1 wijk
 
 
+def _bbox_variants(bbox_rd: list[float]) -> list[tuple[str, dict]]:
+    """Kandidaat-queryparams voor de bbox, in volgorde van waarschijnlijkheid.
+
+    De 3D BAG API interpreteert bbox in de praktijk in RD/EPSG:7415 (de
+    opslag-CRS), niet in het OGC-default CRS84. We proberen daarom eerst RD,
+    dan RD met explicit bbox-crs, en pas dan lon/lat.
+    """
+    rd = ",".join(f"{v:.2f}" for v in bbox_rd)
+    wgs = ",".join(f"{v:.7f}" for v in rd_bbox_to_wgs84(bbox_rd))
+    return [
+        ("rd-plain", {"bbox": rd, "limit": PAGE_LIMIT}),
+        (
+            "rd-bbox-crs",
+            {
+                "bbox": rd,
+                "bbox-crs": "http://www.opengis.net/def/crs/EPSG/0/7415",
+                "limit": PAGE_LIMIT,
+            },
+        ),
+        ("crs84", {"bbox": wgs, "limit": PAGE_LIMIT}),
+    ]
+
+
 def fetch_buildings(bbox_rd: list[float], cache_dir: str | Path) -> tuple[dict, list[dict]]:
     """Haal alle panden binnen de RD-bbox op. Returnt (metadata, features)."""
     cache = Path(cache_dir)
@@ -31,20 +54,35 @@ def fetch_buildings(bbox_rd: list[float], cache_dir: str | Path) -> tuple[dict, 
 
     session = requests.Session()
     session.headers["User-Agent"] = "local-damage-pipeline/0.1 (+github.com/falconnt/local-damage)"
-
-    # De API accepteert bbox in CRS84 (lon/lat); RD-bbox eerst omrekenen.
-    bbox_wgs = rd_bbox_to_wgs84(bbox_rd)
     url = f"{API_BASE}/collections/{COLLECTION}/items"
-    params: dict | None = {
-        "bbox": ",".join(f"{v:.7f}" for v in bbox_wgs),
-        "limit": PAGE_LIMIT,
-    }
+
+    # eerste pagina: bbox-varianten proberen tot er features komen
+    params: dict | None = None
+    first_page: dict | None = None
+    for label, candidate in _bbox_variants(bbox_rd):
+        try:
+            resp = _get_with_retry(session, url, candidate, tries=2)
+        except requests.RequestException as exc:
+            log.warning("3dbag bbox-variant %s geweigerd (%s), volgende proberen", label, exc)
+            continue
+        data = resp.json()
+        count = len(data.get("features") or ([data] if "CityObjects" in data else []))
+        log.info("3dbag bbox-variant %s: %d features", label, count)
+        if count > 0:
+            params, first_page = candidate, data
+            break
+
+    if first_page is None:
+        log.error("geen enkele bbox-variant leverde features op voor bbox %s", bbox_rd)
+        return {}, []
 
     metadata: dict = {}
     features: list[dict] = []
+    data = first_page
     for page in range(MAX_PAGES):
-        resp = _get_with_retry(session, url, params)
-        data = resp.json()
+        if page > 0:
+            resp = _get_with_retry(session, url, params)
+            data = resp.json()
         (cache / f"3dbag_page_{page:03d}.json").write_text(json.dumps(data))
 
         metadata = data.get("metadata") or metadata

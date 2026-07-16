@@ -62,6 +62,7 @@ jobs:
           name: fetch-cache
           path: .cache
           if-no-files-found: ignore
+          include-hidden-files: true
           retention-days: 7
 
       - uses: actions/upload-pages-artifact@v3

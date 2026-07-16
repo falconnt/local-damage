@@ -185,7 +185,8 @@ def features_to_soup(
         city_objects = node.get("CityObjects")
         if not city_objects:
             continue
-        transform = node.get("transform") or meta_transform
+        # transform-prioriteit: feature-eigen > pagina (tegel) > dataset-header
+        transform = node.get("transform") or feat.get("_page_transform") or meta_transform
         vertices = _transform_vertices(node.get("vertices", []), transform)
         if vertices.size == 0:
             continue

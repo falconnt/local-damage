@@ -22,10 +22,9 @@ API_BASE = "https://api.3dbag.nl"
 COLLECTION = "pand"
 PAGE_LIMIT = 100
 MAX_PAGES = 200  # veiligheidsklep: ~20k gebouwen is ruim genoeg voor 1 wijk
-# De API selecteert in de praktijk per interne tegel: een strak bbox-verzoek
-# kan hele stukken van de wijk missen. Daarom vragen we ruimer op en clippen
-# we client-side op footprint-centroid (zie cityjson.parse_city_objects).
-EXPAND_M = 300.0
+# De API selecteert per interne tegel: iets ruimer opvragen + client-side
+# clippen op footprint-centroid houdt de dekking compleet en de rand strak.
+EXPAND_M = 100.0
 
 
 def _bbox_variants(bbox_rd: list[float]) -> list[tuple[str, dict]]:
@@ -101,6 +100,15 @@ def fetch_buildings(bbox_rd: list[float], cache_dir: str | Path) -> tuple[dict, 
         if page_feats is None and "CityObjects" in data:
             # sommige antwoorden zijn 1 CityJSON-document i.p.v. een featurelijst
             page_feats = [data]
+        # BELANGRIJK: elke pagina komt uit een andere interne tegel met een
+        # eigen transform (translate). Die moet bij de features blijven, anders
+        # staan gebouwen van latere pagina's honderden meters verschoven.
+        page_transform = (data.get("metadata") or {}).get("transform")
+        if page_transform:
+            log.info("3dbag pagina %d translate: %s", page, page_transform.get("translate"))
+            for feat in page_feats or []:
+                if isinstance(feat, dict):
+                    feat.setdefault("_page_transform", page_transform)
         features.extend(page_feats or [])
         log.info("3dbag pagina %d: %d features (totaal %d)", page, len(page_feats or []), len(features))
 

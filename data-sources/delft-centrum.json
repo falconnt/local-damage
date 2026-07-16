@@ -1,0 +1,15 @@
+{
+  "id": "delft-centrum",
+  "name": "Delft — Binnenstad",
+  "crs": "EPSG:28992",
+  "bbox_rd": [84250, 447200, 84750, 447700],
+  "terrain": {
+    "source": "ahn_dtm",
+    "resolution_m": 2.0
+  },
+  "buildings": {
+    "source": "3dbag",
+    "lod": "2.2"
+  },
+  "notes": "Startwijk voor MVP stap 1. Bbox in RD New (EPSG:28992), ca. 500x500 m."
+}

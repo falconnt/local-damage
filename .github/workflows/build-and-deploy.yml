@@ -1,0 +1,79 @@
+# MVP stap 1: echte wijk bouwen (AHN + 3D BAG) en viewer + tiles naar GitHub Pages.
+# De gecommitte demo-GLB (dist/tiles) is de fallback: als de open-data-endpoints
+# haperen deployt de site alsnog, met de synthetische wijk.
+name: build-and-deploy
+
+on:
+  push:
+    branches:
+      - main
+      - claude/local-damage-mvp-github-xox0n5
+  workflow_dispatch:
+    inputs:
+      area:
+        description: "gebieds-config in data-sources/ (zonder .json)"
+        default: "delft-centrum"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install pipeline dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Assemble site (viewer + demo-fallback-tiles)
+        run: |
+          mkdir -p site/tiles
+          cp -r viewer/* site/
+          cp -r dist/tiles/* site/tiles/
+
+      - name: Build real area from open data (AHN + 3D BAG)
+        id: realbuild
+        continue-on-error: true
+        run: |
+          AREA="${{ github.event.inputs.area || 'delft-centrum' }}"
+          python -m pipeline.build_area --config "data-sources/${AREA}.json" --out site/tiles --cache .cache
+
+      - name: Report fallback
+        if: steps.realbuild.outcome == 'failure'
+        run: echo "::warning::Open-data-build mislukt — site deployt met synthetische demo-wijk. Zie cache-artifact voor de ruwe API-antwoorden."
+
+      - name: Upload fetch cache for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetch-cache
+          path: .cache
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,4 @@
+numpy>=1.26
+pygltflib>=1.16
+requests>=2.31
+rasterio>=1.3

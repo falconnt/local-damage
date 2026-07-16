@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Local Damage — wandelbare 3D-wereld uit Nederlandse open data</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d2a; font-family: system-ui, -apple-system, sans-serif; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; touch-action: none; }
+
+    /* diorama-sfeer: subtiele vignette + film grain (goedkoop, geen post-processing) */
+    #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 3;
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(10, 10, 25, 0.35) 100%); }
+    #grain { position: fixed; inset: 0; pointer-events: none; z-index: 4; opacity: 0.05; mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+    #overlay { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 0.8rem; color: #fff; cursor: pointer;
+      background: rgba(15, 17, 30, 0.55); backdrop-filter: blur(4px); text-align: center; padding: 1rem; }
+    #overlay h1 { font-size: clamp(1.6rem, 5vw, 2.6rem); letter-spacing: 0.35em; font-weight: 300; margin: 0; }
+    #overlay p { opacity: 0.85; max-width: 34rem; line-height: 1.5; margin: 0.2rem 0; }
+    #overlay .hint { font-size: 0.85rem; opacity: 0.6; }
+    #overlay.hidden, .hidden { display: none !important; }
+
+    #hud { position: fixed; top: 0.7rem; left: 0.9rem; z-index: 5; color: rgba(255,255,255,0.9);
+      font-size: 0.8rem; letter-spacing: 0.25em; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+    #palettes { position: fixed; top: 0.6rem; right: 0.7rem; z-index: 5; display: flex; gap: 0.4rem; }
+    #palettes button { border: 1px solid rgba(255,255,255,0.35); background: rgba(20,22,38,0.55);
+      color: #fff; padding: 0.35rem 0.7rem; border-radius: 999px; font-size: 0.75rem; cursor: pointer; }
+    #palettes button.active { background: rgba(255,255,255,0.85); color: #1a1d2a; }
+
+    #footer { position: fixed; bottom: 0.45rem; left: 0; right: 0; z-index: 5; text-align: center;
+      color: rgba(255,255,255,0.55); font-size: 0.65rem; pointer-events: none; padding: 0 1rem; }
+    #footer a { color: rgba(255,255,255,0.75); pointer-events: auto; }
+
+    #joystick { position: fixed; z-index: 6; width: 110px; height: 110px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.35); display: none; pointer-events: none; }
+    #joystick .knob { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; border-radius: 50%;
+      background: rgba(255,255,255,0.45); transform: translate(-50%, -50%); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="vignette"></div>
+  <div id="grain"></div>
+
+  <div id="hud">LOCAL DAMAGE</div>
+  <div id="palettes"></div>
+
+  <div id="overlay">
+    <h1>LOCAL DAMAGE</h1>
+    <p id="area-name">wereld laden…</p>
+    <p class="hint" id="start-hint">klik om te lopen — WASD/pijltjes = bewegen · muis = kijken · shift = rennen · esc = menu</p>
+  </div>
+
+  <div id="joystick"><div class="knob"></div></div>
+
+  <div id="footer">
+    hoogte: <a href="https://www.ahn.nl" target="_blank" rel="noopener">AHN</a> via PDOK ·
+    gebouwen: <a href="https://3dbag.nl" target="_blank" rel="noopener">3DBAG</a> © tudelft3d &amp; 3DGI (CC BY 4.0) ·
+    stijl geïnspireerd op <em>art of rally</em>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

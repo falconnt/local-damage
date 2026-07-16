@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.cache/
+site/
+.venv/
+node_modules/
+# NB: dist/tiles/ wordt bewust WEL gecommit (demo-fallback voor de viewer)

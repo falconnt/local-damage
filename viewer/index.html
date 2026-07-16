@@ -58,6 +58,12 @@
       touch-action: none; -webkit-user-select: none; user-select: none; }
     #actions button:active { background: rgba(255,178,125,0.85); }
 
+    #waypoint { position: fixed; z-index: 5; display: none; pointer-events: none;
+      color: #ffd166; font-weight: 700; text-shadow: 0 1px 6px rgba(0,0,0,0.7);
+      transform: translate(-50%, -50%); text-align: center; }
+    #waypoint .arrow { display: inline-block; font-size: 1.6rem; }
+    #waypoint .dist { display: block; font-size: 0.72rem; color: #fff; }
+
     #hud { position: fixed; top: calc(0.7rem + env(safe-area-inset-top)); left: calc(0.9rem + env(safe-area-inset-left));
       z-index: 5; color: rgba(255,255,255,0.9);
       font-size: 0.8rem; letter-spacing: 0.25em; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
@@ -136,9 +142,12 @@
   <button id="menu-btn" type="button" title="terug naar menu">☰</button>
   <div id="ghud"><div id="ghud-main"></div><div class="sub" id="ghud-sub"></div></div>
   <div id="actions">
+    <button id="btn-c" type="button">🛡️</button>
     <button id="btn-a" type="button">👊</button>
     <button id="btn-b" type="button">🦵</button>
   </div>
+
+  <div id="waypoint"><span class="arrow">➤</span><span class="dist"></span></div>
 
   <div id="footer">
     hoogte: <a href="https://www.ahn.nl" target="_blank" rel="noopener">AHN</a> via PDOK ·

@@ -30,6 +30,9 @@ const state = {
   flyVert: 0, // -1/0/+1 via mobiele knoppen
   actionA: false, // 👊 / gas
   actionB: false, // 🦵 / rem
+  actionC: false, // 🛡️ blok
+  pressed: new Set(), // one-shot keydown-buffer: snelle taps droppen nooit
+  waypoint: null, // THREE.Vector3 doel voor de schermrand-pointer
 };
 
 const SURFACE_CLASSES = new Set(['grass', 'road', 'water', 'sand', 'green', 'ground']);
@@ -410,14 +413,14 @@ function buildLabels(data, ox = 0, oz = 0) {
       .reduce((acc, p) => acc.add(new THREE.Vector3(...p)), new THREE.Vector3())
       .divideScalar(positions.length);
     const tex = streetNameTexture(street);
+    // hoog genoeg dat geen dak ervoor staat; depth-test aan zodat namen
+    // nooit door huizen heen schijnen
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: tex,
-      depthTest: false, // altijd leesbaar, ook achter huizen/bomen
       transparent: true,
       opacity: 0.92,
     }));
-    sprite.renderOrder = 999;
-    sprite.position.set(c.x, c.y + 24, c.z);
+    sprite.position.set(c.x, c.y + 42, c.z);
     sprite.userData.aspect = tex.userData.aspect;
     labelState.streets.push(sprite);
     group.add(sprite);
@@ -433,7 +436,7 @@ function updateLabelVisibility() {
     const d = s.position.distanceTo(p);
     const h = THREE.MathUtils.clamp(d * 0.055, 3.5, 26);
     s.scale.set(h * s.userData.aspect, h, 1);
-    s.material.opacity = d < 28 ? 0 : 0.92; // vlak eronder: niet in je gezicht
+    s.material.opacity = d < 46 ? 0 : 0.92; // vlak eronder: niet in je gezicht
   }
   // huisnummers alleen dichtbij tonen; straatnaamborden dragen verder
   if (++labelTick % 30 !== 0) return;
@@ -552,7 +555,7 @@ function setupControls() {
     state.yaw -= e.movementX * 0.0022;
     state.pitch = clampPitch(state.pitch - e.movementY * 0.0022);
   });
-  document.addEventListener('keydown', (e) => state.keys.add(e.code));
+  document.addEventListener('keydown', (e) => { state.keys.add(e.code); state.pressed.add(e.code); });
   document.addEventListener('keyup', (e) => state.keys.delete(e.code));
 
   // touch: linker schermhelft joystick, rechter helft kijken
@@ -647,11 +650,39 @@ function hud(main, sub = '') {
   document.getElementById('ghud-sub').textContent = sub;
 }
 
-function showActions(aIcon = null, bIcon = null) {
+function showActions(aIcon = null, bIcon = null, cIcon = null) {
   const holder = document.getElementById('actions');
   holder.style.display = aIcon && isTouchDevice() ? 'flex' : 'none';
   if (aIcon) document.getElementById('btn-a').textContent = aIcon;
   if (bIcon) document.getElementById('btn-b').textContent = bIcon;
+  document.getElementById('btn-c').style.display = cIcon ? 'block' : 'none';
+  if (cIcon) document.getElementById('btn-c').textContent = cIcon;
+}
+
+// schermrand-pointer naar het missie/race-doel
+const wpVec = new THREE.Vector3();
+function updateWaypoint() {
+  const el = document.getElementById('waypoint');
+  if (!state.waypoint || !state.started) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  wpVec.copy(state.waypoint);
+  wpVec.y = (groundHeight(state.waypoint.x, state.waypoint.z) ?? 0) + 12;
+  const p = wpVec.clone().project(camera);
+  const behind = p.z > 1;
+  let x = (p.x * 0.5 + 0.5) * window.innerWidth;
+  let y = (-p.y * 0.5 + 0.5) * window.innerHeight;
+  if (behind) { x = window.innerWidth - x; y = window.innerHeight * 0.85; }
+  const m = 48; // marge: clamp aan de schermrand
+  const cx = Math.max(m, Math.min(window.innerWidth - m, x));
+  const cy = Math.max(m + 40, Math.min(window.innerHeight - m - 60, y));
+  el.style.left = `${cx}px`;
+  el.style.top = `${cy}px`;
+  // in beeld: pijl wijst omlaag naar het doel; aan de rand: pijl wijst eruit
+  const onScreen = !behind && x === cx && y === cy;
+  const deg = onScreen ? 90 : Math.atan2(y - cy, x - cx) * 180 / Math.PI;
+  el.querySelector('.arrow').style.transform = `rotate(${deg}deg)`;
+  const d = Math.hypot(state.waypoint.x - camera.position.x, state.waypoint.z - camera.position.z);
+  el.querySelector('.dist').textContent = `${Math.round(d)} m`;
 }
 
 // engine-API die de spelmodi injecteren (menu kiest de mode)
@@ -660,6 +691,7 @@ const engine = {
   groundHeight, surfaceAt, castWall,
   hud, showActions, isTouchDevice,
   clampPitch,
+  setWaypoint: (v) => { state.waypoint = v ? v.clone() : null; },
   showMenu: () => showMenu(),
   regionInfo: () => state.world?.region ?? null,
   worldOrigin: () => state.world?.origin ?? [0, 0],
@@ -703,6 +735,7 @@ function tick() {
 
   if (state.started && activeMode) {
     activeMode.tick(dt); // spelmodus stuurt beweging én camera zelf
+    state.pressed.clear();
   } else if (state.started) {
     const fwd = (state.keys.has('KeyW') || state.keys.has('ArrowUp') ? 1 : 0)
       - (state.keys.has('KeyS') || state.keys.has('ArrowDown') ? 1 : 0)
@@ -763,6 +796,7 @@ function tick() {
   sun.target.position.set(camera.position.x, 0, camera.position.z);
   if (state.sunOffset) sun.position.copy(sun.target.position).add(state.sunOffset);
   updateLabelVisibility();
+  updateWaypoint();
 
   renderer.render(scene, camera);
 }

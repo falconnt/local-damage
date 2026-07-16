@@ -86,6 +86,7 @@ export function createRaceMode(engine) {
       );
       goal.position.set(goalPos.x, goalPos.y + 30, goalPos.z);
       engine.scene.add(goal);
+      engine.setWaypoint?.(goalPos, '🏁');
 
       engine.showActions('🚀', '🛑');
       t0 = performance.now();
@@ -101,6 +102,7 @@ export function createRaceMode(engine) {
         engine.scene.remove(goal);
         goal.geometry.dispose(); goal.material.dispose();
       }
+      engine.setWaypoint?.(null);
     },
 
     tick(dt) {

@@ -60,13 +60,22 @@ def _gabled_house(x: float, y: float, w: float, d: float, wall_h: float, ridge_h
     soup.add_polygon("ground", np.array([b[3], b[2], b[1], b[0]]), tint)
 
 
-def synthetic_buildings(heights: np.ndarray, resolution_m: float, size_m: float, seed: int = 11) -> TriangleSoup:
-    """Een grid-wijkje met rijtjeshuizen langs straatjes + een kerkje."""
+def synthetic_buildings(
+    heights: np.ndarray, resolution_m: float, size_m: float, seed: int = 11
+) -> tuple[TriangleSoup, list[dict]]:
+    """Een grid-wijkje met rijtjeshuizen langs straatjes + een kerkje.
+
+    Geeft ook nep-adressen terug (zelfde vorm als fetch_bag) zodat de
+    bordjes-keten offline getest kan worden.
+    """
     rng = np.random.default_rng(seed)
     soup = TriangleSoup()
+    addresses: list[dict] = []
 
     street_pitch = 60.0
-    for by in np.arange(45.0, size_m - 45.0, street_pitch):
+    for row, by in enumerate(np.arange(45.0, size_m - 45.0, street_pitch)):
+        street = "Demostraat" if row % 2 == 0 else "Testlaan"
+        number = 1
         for bx in np.arange(35.0, size_m - 35.0, 13.0):
             if rng.random() < 0.15:
                 continue  # gaatje in het blok
@@ -75,13 +84,17 @@ def synthetic_buildings(heights: np.ndarray, resolution_m: float, size_m: float,
             ridge = wall_h + rng.uniform(1.5, 3.5)
             tint = rng.uniform(0.86, 1.0)
             _gabled_house(bx, by, 8.0, rng.uniform(8.0, 12.0), wall_h, ridge, 0.0, soup, gz, tint)
+            addresses.append(
+                {"street": street, "number": str(number), "numeric": number, "x": bx, "y": by}
+            )
+            number += 2
 
     # "kerkje": hoge toren in het midden
     cx = cy = size_m / 2
     gz = sample_height(heights, resolution_m, cx, cy)
     _gabled_house(cx, cy + 14, 14.0, 26.0, 9.0, 15.0, 0.0, soup, gz, 0.95)
     _gabled_house(cx, cy - 8, 9.0, 9.0, 22.0, 30.0, 0.0, soup, gz, 0.9)
-    return soup
+    return soup, addresses
 
 
 def synthetic_overlays(heights: np.ndarray, resolution_m: float, size_m: float) -> TriangleSoup:

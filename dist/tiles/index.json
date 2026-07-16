@@ -5,6 +5,7 @@
       "id": "demo",
       "name": "Demo \u2014 synthetische wijk",
       "file": "demo.glb",
+      "addresses": "demo-addresses.json",
       "synthetic": true,
       "size_m": 400.0
     }

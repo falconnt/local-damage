@@ -28,9 +28,18 @@ SYNTHETIC_RES_M = 2.0
 
 
 def build_synthetic(out_dir: Path) -> dict:
+    from . import labels
+
     log.info("synthetische demo-wijk bouwen…")
     heights = synthetic.synthetic_heights(SYNTHETIC_SIZE_M, SYNTHETIC_RES_M)
-    soup = synthetic.synthetic_buildings(heights, SYNTHETIC_RES_M, SYNTHETIC_SIZE_M)
+    soup, addresses = synthetic.synthetic_buildings(heights, SYNTHETIC_RES_M, SYNTHETIC_SIZE_M)
+
+    def ground(x: float, y: float) -> float:
+        return terrain.sample_height(heights, SYNTHETIC_RES_M, x, y)
+
+    label_data = labels.place_labels(addresses, soup, ground)
+    (out_dir / "demo-addresses.json").write_text(json.dumps(label_data))
+
     overlays = synthetic.synthetic_overlays(heights, SYNTHETIC_RES_M, SYNTHETIC_SIZE_M)
     for cls, tris in overlays.triangles.items():
         for tri, tint in zip(tris, overlays.tints[cls]):
@@ -47,13 +56,14 @@ def build_synthetic(out_dir: Path) -> dict:
         "id": "demo",
         "name": "Demo — synthetische wijk",
         "file": "demo.glb",
+        "addresses": "demo-addresses.json",
         "synthetic": True,
         "size_m": SYNTHETIC_SIZE_M,
     }
 
 
 def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
-    from . import fetch_3dbag, fetch_ahn  # lazy: alleen online route heeft requests nodig
+    from . import fetch_3dbag, fetch_ahn, fetch_bag, fetch_bgt, labels  # lazy: online route
 
     config = json.loads(config_path.read_text())
     area_id = config["id"]
@@ -84,10 +94,13 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
         cols = int(round(size_x / res)) + 1
         heights = np.zeros((rows, cols))
 
-    # 2) gebouwen (3D BAG LoD2.2)
+    def ground(x: float, y: float) -> float:
+        return terrain.sample_height(heights, res, x, y)
+
+    # 2) gebouwen (3D BAG LoD2.2), gesnapt op het terrein tegen zwevende huizen
     metadata, features = fetch_3dbag.fetch_buildings(bbox, cache_dir / area_id)
     log.info("3dbag: %d features", len(features))
-    soup = cityjson.features_to_soup(metadata, features, origin)
+    soup = cityjson.features_to_soup(metadata, features, origin, ground_sampler=ground)
     n_tris = sum(len(v) for v in soup.triangles.values())
     if n_tris == 0:
         # een echte wijk zonder één gebouw is vrijwel zeker een fetch/parse-bug;
@@ -96,27 +109,69 @@ def build_real(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
             f"geen gebouw-geometrie voor {area_id} — controleer cache-JSON in {cache_dir / area_id}"
         )
 
-    meshes = assemble_meshes(heights, res, soup)
+    # 3) ondergronden uit de BGT (tolerant: zonder BGT blijft alles gras)
+    surface_masks = {}
+    try:
+        surfaces = fetch_bgt.fetch_surfaces(bbox, cache_dir / area_id)
+        surface_masks = terrain.classify_cells(heights, res, surfaces, origin)
+    except Exception as exc:  # noqa: BLE001 — bewuste fallback, wijk blijft bruikbaar
+        log.warning("BGT-ondergronden overgeslagen: %s", exc)
+
+    # 4) adressen uit de BAG -> bordjes-JSON (tolerant)
+    addresses_file = None
+    try:
+        raw_addresses = fetch_bag.fetch_addresses(bbox, cache_dir / area_id)
+        for addr in raw_addresses:  # naar lokale coordinaten
+            addr["x"] -= origin[0]
+            addr["y"] -= origin[1]
+        if raw_addresses:
+            label_data = labels.place_labels(raw_addresses, soup, ground)
+            addresses_file = f"{area_id}-addresses.json"
+            (out_dir / addresses_file).write_text(json.dumps(label_data))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("BAG-adressen overgeslagen: %s", exc)
+
+    meshes = assemble_meshes(heights, res, soup, surface_masks)
     out = glb.write_glb(
         meshes,
         out_dir / f"{area_id}.glb",
         extras={"area": area_id, "origin_rd": list(origin), "bbox_rd": bbox},
     )
     log.info("geschreven: %s (%.1f MB)", out, out.stat().st_size / 1e6)
-    return {
+    entry = {
         "id": area_id,
         "name": config.get("name", area_id),
         "file": f"{area_id}.glb",
         "origin_rd": list(origin),
         "bbox_rd": bbox,
-        "attribution": "3DBAG (CC BY 4.0, tudelft3d & 3DGI) · AHN via PDOK",
+        "attribution": "3DBAG (CC BY 4.0, tudelft3d & 3DGI) · AHN/BGT/BAG via PDOK",
     }
+    if addresses_file:
+        entry["addresses"] = addresses_file
+    return entry
 
 
-def assemble_meshes(heights: np.ndarray, resolution_m: float, soup: TriangleSoup):
-    """Terrein (smooth) + alle soup-klassen (flat) -> lijst render-meshes."""
+def assemble_meshes(
+    heights: np.ndarray,
+    resolution_m: float,
+    soup: TriangleSoup,
+    surface_masks: dict | None = None,
+):
+    """Terrein (smooth) + BGT-ondergrondlagen + soup-klassen (flat)."""
     meshes = [terrain.grid_to_mesh(heights, resolution_m, cls="grass")]
-    for cls in ("roof", "wall", "ground", "road", "water"):
+
+    if surface_masks:
+        normals = terrain.normals_grid(heights, resolution_m)
+        lifts = {"sand": 0.03, "road": 0.06, "water": -0.25}
+        for cls, mask in surface_masks.items():
+            mesh = terrain.overlay_from_mask(
+                heights, resolution_m, mask, cls, lifts.get(cls, 0.05), normals
+            )
+            if mesh is not None:
+                meshes.append(mesh)
+                log.info("ondergrond %s: %d cellen", cls, int(mask.sum()))
+
+    for cls in ("roof", "wall", "ground", "road", "water", "sand"):
         mesh = soup_to_flat_mesh(soup, cls)
         if mesh is not None:
             meshes.append(mesh)

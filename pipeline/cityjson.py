@@ -102,8 +102,15 @@ def parse_city_objects(
     soup: TriangleSoup,
     origin: np.ndarray,
     surface_types: list[dict] | None = None,
+    ground_sampler=None,
 ) -> int:
-    """Voeg alle Building(Part)-geometrie toe aan de soup. Returnt #faces."""
+    """Voeg alle Building(Part)-geometrie toe aan de soup. Returnt #faces.
+
+    ground_sampler(x, y) -> terreinhoogte (lokale coords). Als die meegegeven
+    is, wordt elk gebouw verticaal gesnapt: de onderkant komt op de laagste
+    terreinhoogte onder de footprint. Dat voorkomt zwevende huizen doordat
+    3D BAG-maaiveld en ons gladgestreken AHN-grid net verschillen.
+    """
     faces_added = 0
     for obj_id, obj in city_objects.items():
         if obj.get("type") not in ("Building", "BuildingPart"):
@@ -115,6 +122,7 @@ def parse_city_objects(
         tint = _object_tint(obj_id)
         sem_surfaces = (geom.get("semantics") or {}).get("surfaces") or surface_types or []
 
+        faces: list[tuple[str, np.ndarray]] = []
         for ring_idx, sem in _iter_faces(geom):
             if len(ring_idx) < 3:
                 continue
@@ -127,12 +135,34 @@ def parse_city_objects(
             except IndexError:
                 log.warning("vertex-index buiten bereik in %s, face overgeslagen", obj_id)
                 continue
+            faces.append((cls, ring))
+
+        if not faces:
+            continue
+
+        if ground_sampler is not None:
+            pts = np.concatenate([ring for _, ring in faces])
+            base_z = float(pts[:, 2].min())
+            # steekproef over de footprint is genoeg (en snel)
+            sample = pts[:: max(1, len(pts) // 32)]
+            terrain_min = min(ground_sampler(float(p[0]), float(p[1])) for p in sample)
+            drop = base_z - (terrain_min - 0.10)
+            if drop > 0.01:  # alleen omlaag snappen, nooit gebouwen optillen
+                for _, ring in faces:
+                    ring[:, 2] -= drop
+
+        for cls, ring in faces:
             soup.add_polygon(cls, ring, tint)
             faces_added += 1
     return faces_added
 
 
-def features_to_soup(metadata: dict, features: list[dict], origin_rd: np.ndarray) -> TriangleSoup:
+def features_to_soup(
+    metadata: dict,
+    features: list[dict],
+    origin_rd: np.ndarray,
+    ground_sampler=None,
+) -> TriangleSoup:
     """CityJSONFeatures van api.3dbag.nl -> TriangleSoup in lokale coordinaten."""
     soup = TriangleSoup()
     meta_transform = (metadata or {}).get("transform")
@@ -149,7 +179,9 @@ def features_to_soup(metadata: dict, features: list[dict], origin_rd: np.ndarray
         vertices = _transform_vertices(node.get("vertices", []), transform)
         if vertices.size == 0:
             continue
-        total_faces += parse_city_objects(city_objects, vertices, soup, origin)
+        total_faces += parse_city_objects(
+            city_objects, vertices, soup, origin, ground_sampler=ground_sampler
+        )
 
     log.info("gebouwen geparsed: %d faces", total_faces)
     return soup

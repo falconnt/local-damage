@@ -129,6 +129,16 @@ async function init() {
   });
   scene.add(gltf.scene);
 
+  // huisnummerbordjes + straatnaamborden (blauw/wit, NL-stijl)
+  if (area.addresses) {
+    try {
+      const labels = await (await fetch(base + area.addresses)).json();
+      buildLabels(labels);
+    } catch (err) {
+      console.warn('adresbordjes niet geladen:', err);
+    }
+  }
+
   // spawn iets ten zuiden van het midden, kijkend richting het centrum
   const center = worldBounds.getCenter(new THREE.Vector3());
   const spawn = { x: center.x, z: center.z + 60 };
@@ -156,6 +166,74 @@ async function findManifest() {
     } catch { /* volgende kandidaat */ }
   }
   throw new Error('tiles/index.json niet gevonden — draai eerst de pipeline');
+}
+
+// --- bordjes (huisnummers + straatnamen) -------------------------------------
+// NL-straatnaambord: verkeersblauw vlak, witte rand, witte kapitalen.
+const SIGN_BLUE = '#00519e';
+const labelState = { numbers: [], signs: [], textures: new Map() };
+
+function labelTexture(text, { width, height, fontPx, border }) {
+  const key = `${text}|${width}`;
+  if (labelState.textures.has(key)) return labelState.textures.get(key);
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = SIGN_BLUE;
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = border;
+  ctx.strokeRect(border * 1.4, border * 1.4, width - border * 2.8, height - border * 2.8);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `bold ${fontPx}px system-ui, Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, width / 2, height / 2 + fontPx * 0.05);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace; // anders wordt het NL-blauw wasserig cyaan
+  tex.anisotropy = 4;
+  labelState.textures.set(key, tex);
+  return tex;
+}
+
+function makePlaque(text, pos, n, { big }) {
+  const chars = Math.max(2, text.length);
+  const tex = big
+    ? labelTexture(text.toUpperCase(), { width: 64 * chars + 96, height: 160, fontPx: 92, border: 10 })
+    : labelTexture(text, { width: 44 * chars + 52, height: 110, fontPx: 62, border: 8 });
+  const w = big ? 0.11 * chars + 0.28 : 0.05 * chars + 0.12;
+  const h = big ? 0.32 : 0.2;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({ map: tex }) // zelfverlicht: altijd leesbaar
+  );
+  mesh.position.set(pos[0], pos[1], pos[2]);
+  mesh.lookAt(pos[0] + n[0], pos[1], pos[2] + n[1]); // gevelnormaal (x, z)
+  return mesh;
+}
+
+function buildLabels(data) {
+  const group = new THREE.Group();
+  for (const item of data.items ?? []) {
+    const plaque = makePlaque(item.number, item.pos, item.n, { big: false });
+    labelState.numbers.push(plaque);
+    group.add(plaque);
+  }
+  for (const sign of data.signs ?? []) {
+    const plaque = makePlaque(sign.street, sign.pos, sign.n, { big: true });
+    labelState.signs.push(plaque);
+    group.add(plaque);
+  }
+  scene.add(group);
+}
+
+let labelTick = 0;
+function updateLabelVisibility() {
+  // huisnummers alleen dichtbij tonen; straatnaamborden dragen verder
+  if (++labelTick % 30 !== 0) return;
+  const p = camera.position;
+  for (const m of labelState.numbers) m.visible = m.position.distanceToSquared(p) < 70 * 70;
+  for (const m of labelState.signs) m.visible = m.position.distanceToSquared(p) < 220 * 220;
 }
 
 // --- stijl / paletten -------------------------------------------------------
@@ -337,9 +415,13 @@ function tick() {
   camera.rotateY(state.yaw);
   camera.rotateX(state.pitch);
   sky.position.copy(camera.position);
+  updateLabelVisibility();
 
   renderer.render(scene, camera);
 }
+
+// debug/test-hook (harmloos in productie)
+window.__ld = { camera, state, labelState };
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

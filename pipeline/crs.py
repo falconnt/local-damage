@@ -48,6 +48,38 @@ def rd_to_wgs84(x: float, y: float) -> tuple[float, float]:
     return LAT0 + sum_n / 3600.0, LON0 + sum_e / 3600.0
 
 
+def wgs84_to_rd(lat: float, lon: float) -> tuple[float, float]:
+    """(lat, lon) in graden -> RD New (m), zelfde benaderingsfamilie (~1 m)."""
+    dlat = 0.36 * (lat - LAT0)
+    dlon = 0.36 * (lon - LON0)
+    x = (
+        X0
+        + 190094.945 * dlon
+        + -11832.228 * dlat * dlon
+        + -114.221 * dlat**2 * dlon
+        + -32.391 * dlon**3
+        + -0.705 * dlat
+        + -2.34 * dlat**3 * dlon
+        + -0.608 * dlat * dlon**3
+        + -0.008 * dlon**2
+        + 0.148 * dlat**2 * dlon**3
+    )
+    y = (
+        Y0
+        + 309056.544 * dlat
+        + 3638.893 * dlon**2
+        + 73.077 * dlat**2
+        + -157.984 * dlat * dlon**2
+        + 59.788 * dlat**3
+        + 0.433 * dlon
+        + -6.439 * dlat**2 * dlon**2
+        + -0.032 * dlat * dlon
+        + 0.092 * dlon**4
+        + -0.054 * dlat * dlon**4
+    )
+    return x, y
+
+
 def rd_bbox_to_wgs84(bbox_rd: list[float]) -> list[float]:
     """[minx, miny, maxx, maxy] RD -> [minlon, minlat, maxlon, maxlat] WGS84.
 

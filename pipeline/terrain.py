@@ -121,6 +121,113 @@ def grid_to_mesh(heights: np.ndarray, resolution_m: float, cls: str = "grass") -
     return Mesh("class:" + cls, cls, positions, normals.astype(np.float32), colors, indices)
 
 
+def normals_grid(heights: np.ndarray, resolution_m: float) -> np.ndarray:
+    """(rows, cols, 3) smooth-normalen uit de hoogtegradient."""
+    dzdx = np.gradient(heights, resolution_m, axis=1)
+    dzdy = np.gradient(heights, resolution_m, axis=0)
+    n = np.dstack([-dzdx, -dzdy, np.ones_like(heights)])
+    n /= np.linalg.norm(n, axis=2, keepdims=True)
+    return n
+
+
+def _points_in_rings(points: np.ndarray, rings: list[np.ndarray]) -> np.ndarray:
+    """Even-odd puntentest over alle ringen samen (gaten werken vanzelf)."""
+    inside = np.zeros(len(points), dtype=bool)
+    px, py = points[:, 0], points[:, 1]
+    for ring in rings:
+        # bbox-voorfilter houdt het snel bij veel kleine vlakken
+        sel = (
+            (px >= ring[:, 0].min()) & (px <= ring[:, 0].max())
+            & (py >= ring[:, 1].min()) & (py <= ring[:, 1].max())
+        )
+        if not sel.any():
+            continue
+        sx, sy = px[sel], py[sel]
+        hit = np.zeros(len(sx), dtype=bool)
+        x1s, y1s = ring[:, 0], ring[:, 1]
+        x2s, y2s = np.roll(x1s, -1), np.roll(y1s, -1)
+        for x1, y1, x2, y2 in zip(x1s, y1s, x2s, y2s):
+            if y1 == y2:
+                continue
+            crosses = (y1 > sy) != (y2 > sy)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                xcross = (x2 - x1) * (sy - y1) / (y2 - y1) + x1
+            hit ^= crosses & (sx < xcross)
+        inside[sel] ^= hit
+    return inside
+
+
+def classify_cells(
+    heights: np.ndarray, resolution_m: float, surfaces: dict[str, list[np.ndarray]], origin: np.ndarray
+) -> dict[str, np.ndarray]:
+    """Per klasse een boolmasker (rows-1, cols-1) van gridcellen in die vlakken.
+
+    surfaces: klasse -> ringen in absolute RD-coordinaten. Volgorde van
+    prioriteit: water wint van road, road wint van sand.
+    """
+    rows, cols = heights.shape
+    cy, cx = np.mgrid[0 : rows - 1, 0 : cols - 1]
+    centers = np.column_stack(
+        [
+            (cx.ravel() + 0.5) * resolution_m + origin[0],
+            (cy.ravel() + 0.5) * resolution_m + origin[1],
+        ]
+    )
+    masks: dict[str, np.ndarray] = {}
+    claimed = np.zeros(len(centers), dtype=bool)
+    for cls in ("water", "road", "sand"):  # prioriteitsvolgorde
+        rings = surfaces.get(cls) or []
+        if not rings:
+            continue
+        inside = _points_in_rings(centers, rings) & ~claimed
+        claimed |= inside
+        masks[cls] = inside.reshape(rows - 1, cols - 1)
+    return masks
+
+
+def overlay_from_mask(
+    heights: np.ndarray,
+    resolution_m: float,
+    mask: np.ndarray,
+    cls: str,
+    lift: float,
+    normals: np.ndarray | None = None,
+) -> Mesh | None:
+    """Bouw een gedrapeerde mesh uit de gemaskeerde gridcellen (volgt terrein)."""
+    if not mask.any():
+        return None
+    rows, cols = heights.shape
+    if normals is None:
+        normals = normals_grid(heights, resolution_m)
+
+    # welke gridknopen zijn in gebruik door de geselecteerde cellen?
+    used = np.zeros((rows, cols), dtype=bool)
+    cell_r, cell_c = np.nonzero(mask)
+    for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)):
+        used[cell_r + dr, cell_c + dc] = True
+
+    node_index = np.full((rows, cols), -1, dtype=np.int64)
+    ur, uc = np.nonzero(used)
+    node_index[ur, uc] = np.arange(len(ur))
+
+    positions = np.column_stack(
+        [uc * resolution_m, ur * resolution_m, heights[ur, uc] + lift]
+    ).astype(np.float32)
+    nrm = normals[ur, uc].astype(np.float32)
+
+    rng = np.random.default_rng(hash(cls) % (2**32))
+    tint = 0.94 + 0.06 * rng.random((len(ur), 1))
+    colors = np.repeat(tint, 3, axis=1).astype(np.float32)
+
+    a = node_index[cell_r, cell_c]
+    b = node_index[cell_r, cell_c + 1]
+    c = node_index[cell_r + 1, cell_c]
+    d = node_index[cell_r + 1, cell_c + 1]
+    indices = np.column_stack([a, b, c, b, d, c]).ravel().astype(np.uint32)
+
+    return Mesh("class:" + cls, cls, positions, nrm, colors, indices)
+
+
 def sample_height(heights: np.ndarray, resolution_m: float, x: float, y: float) -> float:
     """Bilineaire hoogte-sample op lokale (x, y) in meters."""
     rows, cols = heights.shape

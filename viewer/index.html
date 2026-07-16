@@ -34,9 +34,29 @@
 
     #progress { width: min(70vw, 20rem); height: 5px; border-radius: 999px; background: rgba(255,255,255,0.18); overflow: hidden; }
     #progress .bar { height: 100%; width: 0%; background: #ffb27d; border-radius: 999px; transition: width 0.2s; }
-    #start-btn { margin-top: 0.4rem; border: 0; border-radius: 999px; padding: 0.9rem 2.6rem; font-size: 1.05rem;
-      background: #ffb27d; color: #1a1d2a; font-weight: 600; cursor: pointer; display: none; }
-    #start-btn:active { transform: scale(0.97); }
+
+    #modes { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center; margin-top: 0.4rem; }
+    .mode-card { display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
+      width: min(11rem, 42vw); padding: 1rem 0.8rem; border-radius: 1rem; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.25); background: rgba(28,32,54,0.72); color: #fff; }
+    .mode-card:active { transform: scale(0.97); }
+    .mode-card .mode-icon { font-size: 2rem; }
+    .mode-card .mode-name { font-weight: 700; font-size: 1rem; }
+    .mode-card .mode-desc { font-size: 0.72rem; opacity: 0.7; line-height: 1.3; }
+
+    #ghud { position: fixed; top: calc(0.6rem + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+      z-index: 5; color: #fff; font-size: 1rem; font-weight: 600; text-shadow: 0 1px 5px rgba(0,0,0,0.6);
+      text-align: center; pointer-events: none; display: none; }
+    #ghud .sub { font-size: 0.75rem; font-weight: 400; opacity: 0.85; }
+    #menu-btn { position: fixed; top: calc(0.6rem + env(safe-area-inset-top)); left: calc(0.7rem + env(safe-area-inset-left));
+      z-index: 6; width: 2.6rem; height: 2.6rem; border-radius: 50%; font-size: 1rem; display: none;
+      border: 1px solid rgba(255,255,255,0.35); background: rgba(20,22,38,0.55); color: #fff; cursor: pointer; }
+    #actions { position: fixed; right: calc(0.8rem + env(safe-area-inset-right));
+      bottom: calc(2.2rem + env(safe-area-inset-bottom)); z-index: 6; display: none; gap: 0.6rem; }
+    #actions button { width: 4rem; height: 4rem; border-radius: 50%; font-size: 1.6rem;
+      border: 1px solid rgba(255,255,255,0.4); background: rgba(20,22,38,0.6); color: #fff;
+      touch-action: none; -webkit-user-select: none; user-select: none; }
+    #actions button:active { background: rgba(255,178,125,0.85); }
 
     #hud { position: fixed; top: calc(0.7rem + env(safe-area-inset-top)); left: calc(0.9rem + env(safe-area-inset-left));
       z-index: 5; color: rgba(255,255,255,0.9);
@@ -88,7 +108,20 @@
     <h1>LOCAL DAMAGE</h1>
     <p id="area-name">wereld laden…</p>
     <div id="progress"><div class="bar"></div></div>
-    <button id="start-btn" type="button">start wandeling</button>
+    <div id="modes" class="hidden">
+      <button class="mode-card" data-mode="free" type="button">
+        <span class="mode-icon">🪂</span><span class="mode-name">Free roam</span>
+        <span class="mode-desc">vlieg en wandel vrij door de wijk</span>
+      </button>
+      <button class="mode-card" data-mode="fight" type="button">
+        <span class="mode-icon">🥋</span><span class="mode-name">Stickman missie</span>
+        <span class="mode-desc">vecht je een weg van A naar B</span>
+      </button>
+      <button class="mode-card" data-mode="race" type="button">
+        <span class="mode-icon">🏎️</span><span class="mode-name">Race</span>
+        <span class="mode-desc">zo snel mogelijk van A naar B</span>
+      </button>
+    </div>
     <p class="hint" id="start-hint"></p>
   </div>
 
@@ -98,6 +131,13 @@
   <div id="fly-vert">
     <button id="fly-up" type="button">▲</button>
     <button id="fly-down" type="button">▼</button>
+  </div>
+
+  <button id="menu-btn" type="button" title="terug naar menu">☰</button>
+  <div id="ghud"><div id="ghud-main"></div><div class="sub" id="ghud-sub"></div></div>
+  <div id="actions">
+    <button id="btn-a" type="button">👊</button>
+    <button id="btn-b" type="button">🦵</button>
   </div>
 
   <div id="footer">

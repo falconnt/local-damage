@@ -1,12 +1,14 @@
 // Local Damage service worker — maakt de app installeerbaar en (na eerste
 // bezoek) offline bruikbaar. Strategie: network-first met cache-fallback,
 // zodat updates altijd voorrang krijgen maar de app zonder netwerk blijft werken.
-const CACHE = 'local-damage-v3';
+const CACHE = 'local-damage-v4';
 
 const SHELL = [
   './',
   './index.html',
   './main.js',
+  './game/stickman.js',
+  './game/race.js',
   './manifest.webmanifest',
   './palettes/palettes.json',
   './vendor/three/three.module.js',

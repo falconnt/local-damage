@@ -22,11 +22,17 @@ const state = {
   joystick: { active: false, x: 0, y: 0 },
   lookTouch: { id: null, x: 0, y: 0 },
   walkables: [],
+  surfaces: [],  // alle ondergrond-meshes (voor surfaceAt: weg/water/zand/groen)
+  blockers: [],  // muren (botsing voor stickman en auto)
   classMeshes: new Map(),
   started: false,
   fly: false,
   flyVert: 0, // -1/0/+1 via mobiele knoppen
+  actionA: false, // 👊 / gas
+  actionB: false, // 🦵 / rem
 };
+
+const SURFACE_CLASSES = new Set(['grass', 'road', 'water', 'sand', 'green', 'ground']);
 
 // --- renderer / scene ------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -129,6 +135,8 @@ function prepareMesh(node) {
   node.receiveShadow = true;
   if (!state.classMeshes.has(cls)) state.classMeshes.set(cls, new Set());
   state.classMeshes.get(cls).add(node);
+  if (SURFACE_CLASSES.has(cls)) state.surfaces.push(node);
+  if (cls === 'wall') state.blockers.push(node);
   return cls;
 }
 
@@ -264,7 +272,10 @@ function unloadTile(rec) {
     m.geometry.dispose();
     m.material.dispose(); // gradientMap is gedeeld en blijft leven
   }
-  state.walkables = state.walkables.filter((w) => !rec.walkables.includes(w));
+  const gone = new Set(rec.meshes);
+  state.walkables = state.walkables.filter((w) => !gone.has(w));
+  state.surfaces = state.surfaces.filter((s) => !gone.has(s));
+  state.blockers = state.blockers.filter((b) => !gone.has(b));
   if (rec.labelRefs) {
     scene.remove(rec.labelRefs.group);
     for (const key of ['numbers', 'signs', 'streets']) {
@@ -485,25 +496,30 @@ function buildPaletteButtons() {
 // --- besturing --------------------------------------------------------------
 function setupControls() {
   const overlay = document.getElementById('overlay');
-  const startBtn = document.getElementById('start-btn');
   document.getElementById('start-hint').textContent = isTouchDevice()
-    ? 'linkerduim = lopen (verder duwen = rennen) · rechterduim = rondkijken · 🪂 = vliegen'
-    : 'WASD = bewegen · muis = kijken · shift = rennen · F = vliegen (spatie/C = stijgen/dalen)';
-  startBtn.style.display = 'inline-block';
+    ? 'linkerduim = bewegen · rechterduim = rondkijken'
+    : 'WASD = bewegen · muis = kijken · shift = rennen/sneller · esc = menu';
+  document.getElementById('modes').classList.remove('hidden');
 
-  const start = () => {
-    overlay.classList.add('hidden');
-    state.started = true;
-    setFly(true); // start vliegend: mooiste eerste beeld van de wijk
-    if (isTouchDevice()) {
-      // volledig scherm voelt als een echte app; mislukt stilletjes in PWA-modus
-      document.documentElement.requestFullscreen?.().catch(() => {});
-    } else {
-      renderer.domElement.requestPointerLock();
+  for (const card of document.querySelectorAll('.mode-card')) {
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      startMode(card.dataset.mode);
+    });
+  }
+  document.getElementById('menu-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    showMenu();
+  });
+
+  // actieknoppen (mobiel): modes lezen state.actionA/actionB
+  for (const [id, prop] of [['btn-a', 'actionA'], ['btn-b', 'actionB']]) {
+    const btn = document.getElementById(id);
+    btn.addEventListener('pointerdown', (e) => { e.preventDefault(); state[prop] = true; });
+    for (const evt of ['pointerup', 'pointercancel', 'pointerleave']) {
+      btn.addEventListener(evt, () => { state[prop] = false; });
     }
-  };
-  startBtn.addEventListener('click', (e) => { e.stopPropagation(); start(); });
-  overlay.addEventListener('click', start);
+  }
 
   // vliegmodus: knop (mobiel + desktop) of F-toets
   const flyBtn = document.getElementById('fly-btn');
@@ -515,8 +531,9 @@ function setupControls() {
     flyVert.classList.toggle('visible', on && isTouchDevice());
     if (!on) state.flyVert = 0;
   };
+  engine.setFly = setFly;
   flyBtn.addEventListener('click', (e) => { e.stopPropagation(); setFly(!state.fly); });
-  document.addEventListener('keydown', (e) => { if (e.code === 'KeyF' && state.started) setFly(!state.fly); });
+  document.addEventListener('keydown', (e) => { if (e.code === 'KeyF' && state.started && !activeMode) setFly(!state.fly); });
   for (const [id, dir] of [['fly-up', 1], ['fly-down', -1]]) {
     const btn = document.getElementById(id);
     btn.addEventListener('pointerdown', (e) => { e.preventDefault(); state.flyVert = dir; });
@@ -526,7 +543,7 @@ function setupControls() {
   }
   document.addEventListener('pointerlockchange', () => {
     if (!document.pointerLockElement && state.started && !isTouchDevice()) {
-      overlay.classList.remove('hidden'); // esc -> menu terug
+      showMenu(); // esc -> terug naar het spelmenu
     }
   });
 
@@ -604,11 +621,89 @@ function groundHeight(x, z) {
   return hits.length ? hits[0].point.y : null;
 }
 
+// ondergrond onder (x,z): overlays liggen boven het gras, eerste hit wint
+const surfRay = new THREE.Raycaster();
+function surfaceAt(x, z) {
+  surfRay.set(new THREE.Vector3(x, 500, z), DOWN);
+  const hit = surfRay.intersectObjects(state.surfaces, false)[0];
+  return hit ? { cls: hit.object.userData.cls, y: hit.point.y } : null;
+}
+
+// muur-botsing: eerste wand binnen dist vanaf origin in richting dir
+const wallRay = new THREE.Raycaster();
+function castWall(origin, dir, dist) {
+  wallRay.set(origin, dir);
+  wallRay.far = dist;
+  return wallRay.intersectObjects(state.blockers, false)[0] ?? null;
+}
+
+// --- spelmodi ----------------------------------------------------------------
+let activeMode = null;
+
+function hud(main, sub = '') {
+  const el = document.getElementById('ghud');
+  el.style.display = main ? 'block' : 'none';
+  document.getElementById('ghud-main').textContent = main ?? '';
+  document.getElementById('ghud-sub').textContent = sub;
+}
+
+function showActions(aIcon = null, bIcon = null) {
+  const holder = document.getElementById('actions');
+  holder.style.display = aIcon && isTouchDevice() ? 'flex' : 'none';
+  if (aIcon) document.getElementById('btn-a').textContent = aIcon;
+  if (bIcon) document.getElementById('btn-b').textContent = bIcon;
+}
+
+// engine-API die de spelmodi injecteren (menu kiest de mode)
+const engine = {
+  THREE, scene, camera, state, sky,
+  groundHeight, surfaceAt, castWall,
+  hud, showActions, isTouchDevice,
+  clampPitch,
+  showMenu: () => showMenu(),
+  regionInfo: () => state.world?.region ?? null,
+  worldOrigin: () => state.world?.origin ?? [0, 0],
+};
+
+function showMenu() {
+  state.started = false;
+  if (activeMode) { activeMode.exit?.(); activeMode = null; }
+  hud(null);
+  showActions(null);
+  document.getElementById('menu-btn').style.display = 'none';
+  document.getElementById('overlay').classList.remove('hidden');
+  document.exitPointerLock?.();
+}
+
+async function startMode(name) {
+  if (activeMode) { activeMode.exit?.(); activeMode = null; }
+  document.getElementById('overlay').classList.add('hidden');
+  document.getElementById('menu-btn').style.display = 'block';
+  document.getElementById('fly-btn').style.display = name === 'free' ? 'block' : 'none';
+  state.started = true;
+  if (isTouchDevice()) document.documentElement.requestFullscreen?.().catch(() => {});
+  else renderer.domElement.requestPointerLock();
+
+  if (name === 'fight') {
+    const { createFightMode } = await import('./game/stickman.js');
+    activeMode = createFightMode(engine);
+  } else if (name === 'race') {
+    const { createRaceMode } = await import('./game/race.js');
+    activeMode = createRaceMode(engine);
+  } else {
+    activeMode = null; // free roam = engine-standaard
+    engine.setFly?.(true);
+  }
+  activeMode?.enter?.();
+}
+
 const clock = new THREE.Clock();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.1);
 
-  if (state.started) {
+  if (state.started && activeMode) {
+    activeMode.tick(dt); // spelmodus stuurt beweging én camera zelf
+  } else if (state.started) {
     const fwd = (state.keys.has('KeyW') || state.keys.has('ArrowUp') ? 1 : 0)
       - (state.keys.has('KeyS') || state.keys.has('ArrowDown') ? 1 : 0)
       - state.joystick.y;
@@ -657,9 +752,11 @@ function tick() {
     }
   }
 
-  camera.rotation.set(0, 0, 0);
-  camera.rotateY(state.yaw);
-  camera.rotateX(state.pitch);
+  if (!activeMode) {
+    camera.rotation.set(0, 0, 0);
+    camera.rotateY(state.yaw);
+    camera.rotateX(state.pitch);
+  }
   sky.position.copy(camera.position);
 
   // zon + schaduwbox reizen met de speler mee (nodig bij tile-streaming)
@@ -671,7 +768,7 @@ function tick() {
 }
 
 // debug/test-hook (harmloos in productie)
-window.__ld = { camera, state, labelState };
+window.__ld = { camera, state, labelState, engine, startMode, getMode: () => activeMode };
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

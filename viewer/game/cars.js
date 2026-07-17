@@ -66,6 +66,39 @@ export const CARS = [
     },
   },
   {
+    id: 'm4',
+    name: 'Bavaria M4',
+    desc: 'Beierse coupé: rauwe kracht, strak in balans — de allrounder',
+    color: 0x2a4d3a, accent: 0x16181c, // Isle of Man-groen + zwart
+    physics: { accel: 12.5, vmaxRoad: 39, vmaxOff: 10, steer: 0.34, grip: 9.5, revMax: 6 },
+    pts: [[2.35, 0.28], [2.35, 0.62], [1.60, 0.78], [0.75, 0.82], [0.15, 1.32], [-0.55, 1.36], [-1.70, 0.95], [-2.20, 0.92], [-2.35, 0.85], [-2.35, 0.30]],
+    width: 1.88,
+    wheels: [{ x: 0.92, z: 1.43, r: 0.34 }, { x: 0.92, z: -1.43, r: 0.34 }],
+    detail(g, mat) {
+      const carbon = mat(this.accent);
+      // dubbele nieren (verticaal, groot — het gezicht van de M4)
+      for (const x of [-0.19, 0.19]) g.add(box(carbon, 0.30, 0.34, 0.09, x, 0.48, 2.36));
+      // carbondak + glasband + snelle voorruit
+      g.add(box(carbon, 1.30, 0.05, 1.45, 0, 1.36, -0.22));
+      g.add(box(GLASS(), this.width + 0.14, 0.34, 1.40, 0, 1.06, -0.45));
+      const front = box(GLASS(), 1.45, 0.42, 0.07, 0, 1.06, 0.42);
+      front.rotation.x = -0.72; // rake van de voorruit
+      g.add(front);
+      // ducktail-lip + slanke lampen + vier uitlaten
+      g.add(box(carbon, 1.50, 0.05, 0.26, 0, 0.97, -2.24));
+      g.add(headlights(2.37, 0.52, 0.70));
+      g.add(taillights(-2.37, 0.72, 0.68));
+      for (const x of [-0.67, -0.43, 0.43, 0.67]) {
+        const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.10, 8), carbon);
+        pipe.rotation.x = Math.PI / 2;
+        pipe.position.set(x, 0.30, -2.37);
+        g.add(pipe);
+      }
+      // spiegels op de A-stijl
+      for (const s of [-1, 1]) g.add(box(carbon, 0.16, 0.07, 0.12, s * 1.00, 1.06, 0.55));
+    },
+  },
+  {
     id: 'van',
     name: 'Kombi',
     desc: 'het busje: traag maar taai — houdt zijn tempo overal vast',

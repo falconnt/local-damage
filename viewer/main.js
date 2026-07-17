@@ -511,7 +511,8 @@ function setupControls() {
   for (const card of document.querySelectorAll('.mode-card')) {
     card.addEventListener('click', (e) => {
       e.stopPropagation();
-      startMode(card.dataset.mode);
+      if (card.dataset.mode === 'race') showCarSelect();
+      else startMode(card.dataset.mode);
     });
   }
   document.getElementById('menu-btn').addEventListener('click', (e) => {
@@ -519,8 +520,8 @@ function setupControls() {
     showMenu();
   });
 
-  // actieknoppen (mobiel): modes lezen state.actionA/actionB
-  for (const [id, prop] of [['btn-a', 'actionA'], ['btn-b', 'actionB']]) {
+  // actieknoppen (mobiel): modes lezen state.actionA/actionB/actionC
+  for (const [id, prop] of [['btn-a', 'actionA'], ['btn-b', 'actionB'], ['btn-c', 'actionC']]) {
     const btn = document.getElementById(id);
     btn.addEventListener('pointerdown', (e) => { e.preventDefault(); state[prop] = true; });
     for (const evt of ['pointerup', 'pointercancel', 'pointerleave']) {
@@ -707,8 +708,44 @@ function showMenu() {
   hud(null);
   showActions(null);
   document.getElementById('menu-btn').style.display = 'none';
+  document.getElementById('car-select').classList.add('hidden');
+  document.getElementById('modes').classList.remove('hidden');
   document.getElementById('overlay').classList.remove('hidden');
   document.exitPointerLock?.();
+}
+
+// autokeuze vóór de race: kaartjes met silhouet + eigenschappen
+async function showCarSelect() {
+  ensureAudio();
+  sfx.click();
+  const { CARS, carSvg } = await import('./game/cars.js');
+  const wrap = document.getElementById('car-cards');
+  if (!wrap.childElementCount) {
+    for (const spec of CARS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mode-card car-card';
+      btn.dataset.car = spec.id;
+      const bar = (v, max) => '▮'.repeat(Math.round((v / max) * 5)).padEnd(5, '▯');
+      btn.innerHTML = `${carSvg(spec)}<span class="mode-name">${spec.name}</span>` +
+        `<span class="car-stats">snelheid ${bar(spec.physics.vmaxRoad, 42)}<br>terrein &nbsp;&nbsp;${bar(spec.physics.vmaxOff, 16)}</span>` +
+        `<span class="mode-desc">${spec.desc}</span>`;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        localStorage.setItem('ld-car', spec.id);
+        startMode('race');
+      });
+      wrap.appendChild(btn);
+    }
+    document.getElementById('car-back').addEventListener('click', (e) => {
+      e.stopPropagation();
+      sfx.click();
+      document.getElementById('car-select').classList.add('hidden');
+      document.getElementById('modes').classList.remove('hidden');
+    });
+  }
+  document.getElementById('modes').classList.add('hidden');
+  document.getElementById('car-select').classList.remove('hidden');
 }
 
 async function startMode(name) {

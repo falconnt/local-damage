@@ -1,44 +1,26 @@
 // Race-modus: zo snel mogelijk van A naar B. De ondergrond bepaalt je tempo
 // (weg = snel, groen/zand = traag), water en gebouwen blokkeren.
+// De auto komt uit cars.js (keuze in het menu) en bepaalt het rijgedrag.
 
 import * as THREE from 'three';
+import { CARS, buildCarModel } from './cars.js';
 
-const ACCEL = 9.0;
 const BRAKE = 18.0;
 const DRAG = 0.35;
-// maximumsnelheid (m/s) per ondergrond
-const VMAX = { road: 33, ground: 15, sand: 12, green: 10, grass: 10, water: 0 };
-
-function buildCar() {
-  const car = new THREE.Group();
-  const paint = new THREE.MeshToonMaterial({ color: 0xd8552f });
-  const dark = new THREE.MeshToonMaterial({ color: 0x22242c });
-
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.45, 3.7), paint);
-  body.position.y = 0.42;
-  body.castShadow = true;
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.42, 1.7), new THREE.MeshToonMaterial({ color: 0xe8e2d2 }));
-  cabin.position.set(0, 0.85, -0.25);
-  cabin.castShadow = true;
-  car.add(body, cabin);
-
-  const wheels = [];
-  for (const [x, z] of [[-0.82, 1.25], [0.82, 1.25], [-0.82, -1.25], [0.82, -1.25]]) {
-    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.26, 10), dark);
-    w.rotation.z = Math.PI / 2;
-    const pivot = new THREE.Group();
-    pivot.position.set(x, 0.34, z);
-    pivot.add(w);
-    car.add(pivot);
-    wheels.push({ pivot, mesh: w, front: z > 0 });
-  }
-  return { car, wheels };
-}
+const BOOST_ACCEL = 12;   // extra duw van de turbo
+const BOOST_CAP = 1.35;   // topsnelheid × dit tijdens boost
+const BOOST_DRAIN = 0.5;  // tank leeg in ~2 s
+const BOOST_REFILL = 0.16;
+// factor op de offroad-topsnelheid per ondergrond
+const OFF = { ground: 1.0, sand: 0.8, green: 0.65, grass: 0.65 };
 
 export function createRaceMode(engine) {
   const { state, camera, hud } = engine;
+  const spec = CARS.find((c) => c.id === localStorage.getItem('ld-car')) ?? CARS[0];
+  const PHY = spec.physics;
   let car, wheels, goal, goalPos;
   let v = 0, heading = 0, t0 = 0, done = false, steerVis = 0;
+  let boostTank = 1, boostLock = false, baseFov = camera.fov;
 
   function findRoadNear(x, z, maxR = 140) {
     // spiraal-samples tot we een wegcel vinden
@@ -71,14 +53,31 @@ export function createRaceMode(engine) {
 
   return {
     enter() {
-      ({ car, wheels } = buildCar());
+      ({ group: car, wheels } = buildCarModel(spec));
+      car.name = 'race-car';
       const [sx, sz] = findRoadNear(camera.position.x, camera.position.z);
       const g = engine.groundHeight(sx, sz) ?? 0;
       car.position.set(sx, g, sz);
       engine.scene.add(car);
-      v = 0; heading = 0; done = false;
+      v = 0; done = false; boostTank = 1; boostLock = false;
+      baseFov = camera.fov;
 
       const [gx, gz] = pickGoal(sx, sz);
+      // start met de neus de weg op, liefst richting het baken
+      const toGoal = Math.atan2(gx - sx, gz - sz);
+      let bestScore = -Infinity;
+      heading = toGoal;
+      for (let i = 0; i < 16; i++) {
+        const h = (i / 16) * Math.PI * 2;
+        let score = 0;
+        for (const d of [4, 8, 12, 16, 22]) {
+          if (engine.surfaceAt(sx + Math.sin(h) * d, sz + Math.cos(h) * d)?.cls === 'road') score += 1;
+        }
+        const turn = Math.abs(Math.atan2(Math.sin(h - toGoal), Math.cos(h - toGoal)));
+        score = score * 10 - turn; // wegdekking eerst, dan richting doel
+        if (score > bestScore) { bestScore = score; heading = h; }
+      }
+      car.rotation.y = heading;
       goalPos = new THREE.Vector3(gx, engine.groundHeight(gx, gz) ?? 0, gz);
       goal = new THREE.Mesh(
         new THREE.CylinderGeometry(3.2, 3.2, 60, 16, 1, true),
@@ -91,7 +90,7 @@ export function createRaceMode(engine) {
       engine.showActions('🚀', '🛑');
       engine.sfx?.engineStart();
       t0 = performance.now();
-      hud('🏁 0.0', 'rij naar het gele baken — weg is snel, gras is traag');
+      hud(`🏁 ${spec.name}`, 'gas = W/joystick · 🚀 = turbo · 🛑 = rem/achteruit');
     },
 
     exit() {
@@ -105,40 +104,59 @@ export function createRaceMode(engine) {
       }
       engine.setWaypoint?.(null);
       engine.sfx?.engineStop();
+      camera.fov = baseFov;
+      camera.updateProjectionMatrix();
     },
 
     tick(dt) {
       if (done) return;
-      // input: pijltjes/WASD of joystick; mobiel: 🚀/🛑 + joystick sturen
+      // input: W/pijltjes/joystick = gas, 🚀/shift = turbo, 🛑/S = rem & achteruit
       const joyMag = Math.hypot(state.joystick.x, state.joystick.y);
-      const throttle = (state.keys.has('KeyW') || state.keys.has('ArrowUp') || state.actionA ? 1 : 0)
-        + (joyMag > 0.15 ? Math.max(0, -state.joystick.y) : 0);
-      const brake = state.keys.has('KeyS') || state.keys.has('ArrowDown') || state.actionB ? 1 : 0;
+      const throttle = Math.min(1,
+        (state.keys.has('KeyW') || state.keys.has('ArrowUp') ? 1 : 0)
+        + (joyMag > 0.15 ? Math.max(0, -state.joystick.y) : 0));
+      const brake = state.keys.has('KeyS') || state.keys.has('ArrowDown') || state.actionB;
       const steer = (state.keys.has('KeyA') || state.keys.has('ArrowLeft') ? -1 : 0)
         + (state.keys.has('KeyD') || state.keys.has('ArrowRight') ? 1 : 0)
         + (joyMag > 0.15 ? state.joystick.x : 0);
 
+      // turbo: eigen stuwkracht + hogere top, tank loopt leeg en laadt weer op
+      const wantBoost = state.actionA || state.keys.has('ShiftLeft') || state.keys.has('ShiftRight');
+      if (boostTank <= 0.01) boostLock = true;      // leeg: eerst bijladen
+      if (boostTank > 0.3) boostLock = false;
+      const boosting = wantBoost && !boostLock && !brake;
+      boostTank = Math.max(0, Math.min(1, boostTank + (boosting ? -BOOST_DRAIN : BOOST_REFILL) * dt));
+
       const surf = engine.surfaceAt(car.position.x, car.position.z);
       const cls = surf?.cls ?? 'grass';
-      const vmax = VMAX[cls] ?? 10;
+      const vmax = cls === 'road' ? PHY.vmaxRoad
+        : cls === 'water' ? 0
+        : PHY.vmaxOff * (OFF[cls] ?? 0.7);
 
-      v += (Math.min(1, throttle) * ACCEL - DRAG * v - brake * BRAKE * Math.sign(v)) * dt;
-      v = Math.max(-6, Math.min(v, Math.max(vmax, v - 14 * dt))); // te snel voor deze ondergrond: hard afremmen
-      if (Math.abs(v) < 0.02 && !throttle) v = 0;
+      v += (throttle * PHY.accel + (boosting ? BOOST_ACCEL : 0) - DRAG * v) * dt;
+      if (brake) {
+        // eerst remmen; sta je (bijna) stil, dan rustig achteruit
+        if (v > 0.2) v = Math.max(0, v - BRAKE * dt);
+        else v = Math.max(v - PHY.accel * 0.7 * dt, -PHY.revMax);
+      }
+      const cap = Math.max(vmax * (boosting ? BOOST_CAP : 1), Math.abs(v) - 14 * dt);
+      v = Math.max(-PHY.revMax, Math.min(v, cap)); // te snel voor deze ondergrond: hard afremmen
+      if (Math.abs(v) < 0.02 && !throttle && !brake) v = 0;
 
-      // sturen: effect schaalt met snelheid (zoals een echte auto)
+      // sturen: effect groeit met snelheid; in z'n achteruit draait het stuur mee
       const steerClamped = Math.max(-1, Math.min(1, steer));
-      heading -= steerClamped * (v / VMAX.road) * 2.4 * dt * Math.sign(v || 1);
+      heading -= steerClamped * Math.min(1, Math.abs(v) / 9) * PHY.steer * dt * Math.sign(v || 1);
       steerVis += (steerClamped - steerVis) * Math.min(1, dt * 10);
 
       const dir = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
       const step = v * dt;
-      // botsen: muren en water blokkeren
+      // botsen: muren en water blokkeren (in beide richtingen)
       const bumper = car.position.clone(); bumper.y += 0.55;
-      const ahead = engine.surfaceAt(car.position.x + dir.x * (step + 1.6), car.position.z + dir.z * (step + 1.6));
-      const wallHit = engine.castWall(bumper, dir.clone().multiplyScalar(Math.sign(v || 1)), Math.abs(step) + 2.1);
+      const sgn = Math.sign(v || 1);
+      const ahead = engine.surfaceAt(car.position.x + dir.x * sgn * (Math.abs(step) + 1.6), car.position.z + dir.z * sgn * (Math.abs(step) + 1.6));
+      const wallHit = engine.castWall(bumper, dir.clone().multiplyScalar(sgn), Math.abs(step) + 2.1);
       if (wallHit || ahead?.cls === 'water') {
-        v = -Math.sign(v) * Math.min(Math.abs(v) * 0.25, 3); // stuiter zachtjes terug
+        v = -sgn * Math.min(Math.abs(v) * 0.25, 3); // stuiter zachtjes terug
       } else {
         car.position.addScaledVector(dir, step);
       }
@@ -147,26 +165,34 @@ export function createRaceMode(engine) {
       car.rotation.y = heading;
 
       for (const w of wheels) {
-        w.mesh.rotation.x += (v / 0.34) * dt;
+        w.mesh.rotation.x += (v / w.r) * dt;
         if (w.front) w.pivot.rotation.y = -steerVis * 0.45;
       }
-      engine.sfx?.engineUpdate(v);
+      engine.sfx?.engineUpdate(v * (boosting ? 1.3 : 1));
 
-      // HUD: tijd + snelheid + afstand
+      // boost voelbaar maken: beeld iets wijder tijdens de turbo
+      const fovT = baseFov + (boosting ? 9 : 0) + Math.max(0, v - PHY.vmaxRoad * 0.7) * 0.25;
+      camera.fov += (fovT - camera.fov) * Math.min(1, dt * 6);
+      camera.updateProjectionMatrix();
+
+      // HUD: tijd + snelheid + turbotank + afstand
       goal.rotation.y += dt * 0.6;
       const sec = (performance.now() - t0) / 1000;
       const gd = Math.hypot(goalPos.x - car.position.x, goalPos.z - car.position.z);
-      hud(`🏁 ${sec.toFixed(1)} s`, `${Math.round(Math.abs(v) * 3.6)} km/u · ${cls === 'road' ? 'asfalt' : cls} · baken: ${Math.round(gd)} m`);
+      const segs = Math.round(boostTank * 5);
+      const tank = '▰'.repeat(segs) + '▱'.repeat(5 - segs);
+      hud(`🏁 ${sec.toFixed(1)} s`, `${Math.round(Math.abs(v) * 3.6)} km/u · ⚡${tank} · ${cls === 'road' ? 'asfalt' : cls} · baken: ${Math.round(gd)} m`);
 
       if (gd < 8) {
         done = true;
         engine.sfx?.engineStop();
         engine.sfx?.jingle(true);
-        const best = Number(localStorage.getItem('ld-race-best') ?? Infinity);
-        if (sec < best) localStorage.setItem('ld-race-best', String(sec));
+        const bestKey = `ld-race-best-${spec.id}`;
+        const best = Number(localStorage.getItem(bestKey) ?? Infinity);
+        if (sec < best) localStorage.setItem(bestKey, String(sec));
         hud(`🏆 finish: ${sec.toFixed(1)} s`, best === Infinity || sec < best
-          ? 'nieuw record! — terug naar het menu…'
-          : `record: ${best.toFixed(1)} s — terug naar het menu…`);
+          ? `nieuw record met de ${spec.name}! — terug naar het menu…`
+          : `record ${spec.name}: ${best.toFixed(1)} s — terug naar het menu…`);
         setTimeout(() => engine.showMenu(), 3200);
       }
 

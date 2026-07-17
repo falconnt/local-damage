@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { MOVES, CHAIN_A, CHAIN_B } from './moves.js';
 import { Ragdoll, computeTargets, LIMBS, P } from './ragdoll.js';
+import { impactBurst } from './fx.js';
 
 const WALK = 3.4, RUN = 7.0;
 const PLAYER_HP = 6, DUMMY_HP = 3;
@@ -74,6 +75,8 @@ export class Fighter {
     if (!m || this.downT !== null) return false;
     this.move = m; this.moveName = name;
     this.moveT = 0; this.prevRoot = 0; this.hitDone = false;
+    if (m.reach) this.engine.sfx?.whoosh();
+    if (name === 'dodge') this.engine.sfx?.dodge();
     return true;
   }
 
@@ -301,25 +304,12 @@ export function separate(a, b) {
   b.rig.impulse(P.chest, nx * 0.6, 0, nz * 0.6);
 }
 
-// --- impact-spark ---------------------------------------------------------------
-export function spark(engine, pos) {
-  const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.5, 0.5),
-    new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.95, depthWrite: false })
-  );
-  m.position.copy(pos);
-  m.rotation.z = Math.random() * Math.PI;
-  engine.scene.add(m);
-  const t0 = performance.now();
-  const grow = () => {
-    const f = (performance.now() - t0) / 160;
-    if (f >= 1) { engine.scene.remove(m); m.geometry.dispose(); m.material.dispose(); return; }
-    m.scale.setScalar(1 + f * 2.2);
-    m.material.opacity = 0.95 * (1 - f);
-    m.lookAt(engine.camera.position);
-    requestAnimationFrame(grow);
-  };
-  grow();
+// impact-effect + geluid bij een bevestigde treffer (gedeeld door modi)
+export function onHit(engine, result, m, strikePos) {
+  impactBurst(engine, strikePos, m.heavy);
+  if (result === 'blocked') engine.sfx?.block();
+  else engine.sfx?.hit(m.heavy);
+  if (result === 'down') engine.sfx?.thud();
 }
 
 // --- missie-modus ------------------------------------------------------------------
@@ -434,7 +424,7 @@ export function createFightMode(engine) {
           const m = player.move;
           const result = dummy.takeHit(m, player);
           const sp = player.strikePoint(new THREE.Vector3()) ?? dummy.position.clone();
-          spark(engine, sp);
+          onHit(engine, result, m, sp);
           player.hitstop = m.hitstop; dummy.hitstop = m.hitstop;
           camShake = m.heavy ? 0.35 : 0.18;
           combo += 1; comboT = 2.0;
@@ -451,6 +441,7 @@ export function createFightMode(engine) {
       const gd = player.position.distanceTo(new THREE.Vector3(goalPos.x, player.position.y, goalPos.z));
       if (gd < 6) {
         done = true;
+        engine.sfx?.jingle(true);
         const downed = dummies.filter((f) => f.downT !== null).length;
         hud('🏆 missie volbracht!', `${downed}/${dummies.length} dummies neergeslagen — terug naar het menu…`);
         setTimeout(() => engine.showMenu(), 3200);

@@ -4,6 +4,8 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VERSION } from './version.js';
+import { sfx, ensureAudio } from './game/sfx.js';
 
 const TILE_PATHS = ['tiles/', '../dist/tiles/']; // Pages-layout, daarna lokale dev-layout
 const EYE_HEIGHT = 1.7;
@@ -103,6 +105,8 @@ const TILE_LOAD_M = 620;   // laden ruim achter de fog-grens: pop-in blijft onzi
 const TILE_UNLOAD_M = 950; // ver weg = geheugen teruggeven
 
 async function init() {
+  document.getElementById('version').textContent = VERSION;
+  document.getElementById('menu-version').textContent = VERSION;
   state.palettes = await (await fetch('./palettes/palettes.json')).json();
   buildPaletteButtons();
 
@@ -690,7 +694,7 @@ const engine = {
   THREE, scene, camera, state, sky,
   groundHeight, surfaceAt, castWall,
   hud, showActions, isTouchDevice,
-  clampPitch,
+  clampPitch, sfx,
   setWaypoint: (v) => { state.waypoint = v ? v.clone() : null; },
   showMenu: () => showMenu(),
   regionInfo: () => state.world?.region ?? null,
@@ -708,6 +712,8 @@ function showMenu() {
 }
 
 async function startMode(name) {
+  ensureAudio(); // user-gesture: audio mag nu starten
+  sfx.click();
   if (activeMode) { activeMode.exit?.(); activeMode = null; }
   document.getElementById('overlay').classList.add('hidden');
   document.getElementById('menu-btn').style.display = 'block';

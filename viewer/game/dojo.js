@@ -3,7 +3,7 @@
 // vechtsysteem te testen zonder missie-druk.
 
 import * as THREE from 'three';
-import { Fighter, spark, separate } from './stickman.js';
+import { Fighter, onHit, separate } from './stickman.js';
 import { MOVES } from './moves.js';
 
 const PLAYER_HP = 99;
@@ -98,7 +98,7 @@ export function createDojoMode(engine) {
           const m = player.move;
           const result = dummy.takeHit(m, player);
           const sp = player.strikePoint(new THREE.Vector3()) ?? dummy.position.clone();
-          spark(engine, sp);
+          onHit(engine, result, m, sp);
           player.hitstop = m.hitstop; dummy.hitstop = m.hitstop;
           camShake = m.heavy ? 0.35 : 0.18;
           combo += 1; comboT = 2.0;

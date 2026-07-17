@@ -89,6 +89,7 @@ export function createRaceMode(engine) {
       engine.setWaypoint?.(goalPos, '🏁');
 
       engine.showActions('🚀', '🛑');
+      engine.sfx?.engineStart();
       t0 = performance.now();
       hud('🏁 0.0', 'rij naar het gele baken — weg is snel, gras is traag');
     },
@@ -103,6 +104,7 @@ export function createRaceMode(engine) {
         goal.geometry.dispose(); goal.material.dispose();
       }
       engine.setWaypoint?.(null);
+      engine.sfx?.engineStop();
     },
 
     tick(dt) {
@@ -148,6 +150,7 @@ export function createRaceMode(engine) {
         w.mesh.rotation.x += (v / 0.34) * dt;
         if (w.front) w.pivot.rotation.y = -steerVis * 0.45;
       }
+      engine.sfx?.engineUpdate(v);
 
       // HUD: tijd + snelheid + afstand
       goal.rotation.y += dt * 0.6;
@@ -157,6 +160,8 @@ export function createRaceMode(engine) {
 
       if (gd < 8) {
         done = true;
+        engine.sfx?.engineStop();
+        engine.sfx?.jingle(true);
         const best = Number(localStorage.getItem('ld-race-best') ?? Infinity);
         if (sec < best) localStorage.setItem('ld-race-best', String(sec));
         hud(`🏆 finish: ${sec.toFixed(1)} s`, best === Infinity || sec < best

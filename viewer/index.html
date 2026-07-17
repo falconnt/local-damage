@@ -76,6 +76,8 @@
     #footer { position: fixed; bottom: calc(0.45rem + env(safe-area-inset-bottom)); left: 0; right: 0; z-index: 5;
       text-align: center; color: rgba(255,255,255,0.55); font-size: 0.65rem; pointer-events: none; padding: 0 1rem; }
     #footer a { color: rgba(255,255,255,0.75); pointer-events: auto; }
+    #footer #version { font-weight: 700; letter-spacing: 0.12em; color: rgba(255,255,255,0.85); }
+    #footer .attrib { opacity: 0.75; }
 
     #joystick { position: fixed; z-index: 6; width: 130px; height: 130px; border-radius: 50%;
       border: 2px solid rgba(255,255,255,0.35); display: none; pointer-events: none; }
@@ -112,6 +114,7 @@
   <div id="overlay">
     <img class="appicon" src="./icons/icon-192.png" alt="" />
     <h1>LOCAL DAMAGE</h1>
+    <p id="menu-version" style="opacity:0.55;font-size:0.75rem;letter-spacing:0.25em;margin:-0.4rem 0 0"></p>
     <p id="area-name">wereld laden…</p>
     <div id="progress"><div class="bar"></div></div>
     <div id="modes" class="hidden">
@@ -154,9 +157,8 @@
   <div id="waypoint"><span class="arrow">➤</span><span class="dist"></span></div>
 
   <div id="footer">
-    hoogte: <a href="https://www.ahn.nl" target="_blank" rel="noopener">AHN</a> via PDOK ·
-    gebouwen: <a href="https://3dbag.nl" target="_blank" rel="noopener">3DBAG</a> © tudelft3d &amp; 3DGI (CC BY 4.0) ·
-    stijl geïnspireerd op <em>art of rally</em>
+    <span id="version">v?</span>
+    <span class="attrib">· AHN/PDOK · <a href="https://3dbag.nl" target="_blank" rel="noopener">3DBAG</a> CC BY 4.0</span>
   </div>
 
   <script type="importmap">

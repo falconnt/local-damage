@@ -1,91 +1,21 @@
-// Stickman-vechtmissie 2.0 — technieken uit productie-vechtgames:
-// hitstop + shake op impact, per-segment easing (zweepslag-strikes),
-// overlapping action (hoofd/onderarmen volgen vertraagd), root motion
-// (uitval), cancel-windows voor combo's, i-frames op de dodge en een
-// bullet-time finisher. Moves zijn data (moves.js).
+// Stickman-vechtmissie — active-ragdoll editie (Stick Fight-stijl).
+// Het lichaam is een Verlet-skelet (ragdoll.js); keyframe-moves (moves.js)
+// leveren de DOELpose en spierveren trekken het lijf erheen. Klappen zijn
+// echte impulsen, een knock-out is spieren-uit. Hitstop, combo-buffering,
+// blokkeren, ontwijken met i-frames en de bullet-time finisher blijven.
 
 import * as THREE from 'three';
 import { MOVES, CHAIN_A, CHAIN_B } from './moves.js';
+import { Ragdoll, computeTargets, LIMBS, P } from './ragdoll.js';
 
 const WALK = 3.4, RUN = 7.0;
 const PLAYER_HP = 6, DUMMY_HP = 3;
-
-// per-joint volgsnelheid: de hoofdactie volgt de keyframes strak (hoge
-// waarden), alleen hoofd en onderarmen slepen na -> overlapping action als
-// subtiele tweede laag, zonder de zweepslag van de strike af te vlakken
-const JOINT_LAG = {
-  torso: 50, hL: 45, hR: 45, sL: 42, sR: 42, kL: 38, kR: 38, eL: 18, eR: 18, head: 11,
-};
-const JOINTS = Object.keys(JOINT_LAG);
 
 const EASE = {
   smooth: (t) => t * t * (3 - 2 * t),
   in: (t) => t * t * t,
   out: (t) => 1 - Math.pow(1 - t, 3),
 };
-
-// --- rig -----------------------------------------------------------------------
-function limb(len, radius, color) {
-  const pivot = new THREE.Group();
-  const mesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(radius, len - radius * 2, 3, 8),
-    new THREE.MeshToonMaterial({ color })
-  );
-  mesh.position.y = -len / 2;
-  mesh.castShadow = true;
-  pivot.add(mesh);
-  return pivot;
-}
-
-export function buildStickman(color = 0x20242c) {
-  const j = {};
-  const root = new THREE.Group();
-  j.root = root;
-
-  j.torso = limb(0.55, 0.055, color);
-  j.torso.children[0].position.y = 0.275;
-  root.add(j.torso);
-
-  const headPivot = new THREE.Group();
-  headPivot.position.y = 0.6;
-  const headMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.13, 12, 10),
-    new THREE.MeshToonMaterial({ color })
-  );
-  headMesh.position.y = 0.12;
-  headMesh.castShadow = true;
-  headPivot.add(headMesh);
-  j.torso.add(headPivot);
-  j.head = headPivot;
-
-  for (const [side, sx] of [['L', -1], ['R', 1]]) {
-    const sh = limb(0.3, 0.045, color);
-    sh.position.set(sx * 0.2, 0.52, 0);
-    j.torso.add(sh);
-    const el = limb(0.3, 0.04, color);
-    el.position.y = -0.28;
-    sh.add(el);
-    const hip = limb(0.45, 0.05, color);
-    hip.position.set(sx * 0.11, 0, 0);
-    root.add(hip);
-    const knee = limb(0.45, 0.045, color);
-    knee.position.y = -0.43;
-    hip.add(knee);
-    j['s' + side] = sh; j['e' + side] = el; j['h' + side] = hip; j['k' + side] = knee;
-  }
-  return { root, j };
-}
-
-// --- animator --------------------------------------------------------------------
-function sampleCurve(points, t) { // [[at, val], ...] lineair
-  if (!points) return 0;
-  let a = points[0], b = points[points.length - 1];
-  for (let i = 0; i < points.length - 1; i++) {
-    if (t >= points[i][0] && t <= points[i + 1][0]) { a = points[i]; b = points[i + 1]; break; }
-  }
-  const f = (t - a[0]) / Math.max(1e-5, b[0] - a[0]);
-  return a[1] + (b[1] - a[1]) * Math.min(1, Math.max(0, f));
-}
 
 function samplePose(clip, t) {
   const frames = clip.frames;
@@ -96,7 +26,8 @@ function samplePose(clip, t) {
   const span = Math.max(1e-5, b.at - a.at);
   const f = (EASE[b.ease] ?? EASE.smooth)(Math.min(1, Math.max(0, (t - a.at) / span)));
   const pose = {};
-  for (const name of JOINTS) {
+  const keys = new Set([...Object.keys(a.pose), ...Object.keys(b.pose)]);
+  for (const name of keys) {
     const pa = a.pose[name] ?? [0, 0, 0];
     const pb = b.pose[name] ?? [0, 0, 0];
     pose[name] = [0, 1, 2].map((i) => pa[i] + (pb[i] - pa[i]) * f);
@@ -104,44 +35,36 @@ function samplePose(clip, t) {
   return pose;
 }
 
-// doelpose per frame toepassen met per-joint lag (overlap/follow-through)
-function driveJoints(j, target, dt) {
-  for (const name of JOINTS) {
-    const [rx, ry, rz] = target[name] ?? [0, 0, 0];
-    const g = j[name];
-    const k = Math.min(1, dt * JOINT_LAG[name]);
-    g.rotation.x += (rx - g.rotation.x) * k;
-    g.rotation.y += (ry - g.rotation.y) * k;
-    g.rotation.z += (rz - g.rotation.z) * k;
+function sampleCurve(points, t) {
+  if (!points) return 0;
+  let a = points[0], b = points[points.length - 1];
+  for (let i = 0; i < points.length - 1; i++) {
+    if (t >= points[i][0] && t <= points[i + 1][0]) { a = points[i]; b = points[i + 1]; break; }
   }
+  const f = (t - a[0]) / Math.max(1e-5, b[0] - a[0]);
+  return a[1] + (b[1] - a[1]) * Math.min(1, Math.max(0, f));
 }
 
 function shortestAngle(from, to) {
   return ((to - from + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
 }
 
-// --- vechter -----------------------------------------------------------------------
 export class Fighter {
   constructor(engine, color, x, z, hp) {
-    const { root, j } = buildStickman(color);
     this.engine = engine;
-    this.root = root; this.j = j;
+    const g = engine.groundHeight(x, z) ?? 0;
+    this.rig = new Ragdoll(engine.scene, color, x, z, g);
+    this.ctrl = { x, z };          // besturingspositie (het lijf veert erachteraan)
+    this.position = new THREE.Vector3(x, g + 0.95, z);
     this.hp = hp;
     this.heading = 0;
     this.walkPhase = 0;
-    this.move = null;       // actieve move (uit MOVES)
-    this.moveT = 0;         // genormaliseerde cliptijd
-    this.prevRoot = 0;      // vorige root-motion sample
-    this.hitDone = false;
-    this.queued = null;     // gebufferde combo-move
+    this.move = null; this.moveT = 0; this.prevRoot = 0;
+    this.hitDone = false; this.queued = null;
     this.blocking = false;
-    this.invuln = 0;
-    this.hitstop = 0;       // bevriezing op impact
+    this.invuln = 0; this.stun = 0; this.hitstop = 0;
     this.downT = null;
-    this.slump = null;      // losse eind-rotaties voor de knock-down
-    const g = engine.groundHeight(x, z) ?? 0;
-    root.position.set(x, g + 0.95, z);
-    engine.scene.add(root);
+    this.targets = new Float64Array(16 * 3);
   }
 
   get busy() { return this.move !== null || this.downT !== null; }
@@ -154,119 +77,133 @@ export class Fighter {
     return true;
   }
 
-  attack(chain) { // chain 'A'|'B': start of buffer (royaal, zoals in echte games)
-    if (this.downT !== null || this.blocking) return;
+  attack(chain) {
+    if (this.downT !== null || this.blocking || this.stun > 0) return;
     if (!this.move) { this.start(chain === 'A' ? CHAIN_A : CHAIN_B); return; }
     const m = this.move;
-    // input op elk moment vóór het einde van het cancel-venster bufferert de
-    // volgende move in de keten — geen "gedropte" combo-inputs
-    if (m.chainsTo && this.moveT <= (m.chainTo ?? 1)) {
-      this.queued = m.chainsTo;
-    }
+    if (m.chainsTo && this.moveT <= (m.chainTo ?? 1)) this.queued = m.chainsTo;
   }
 
   dodge(dirVec) {
-    if (this.busy || this.blocking) return;
+    if (this.busy || this.blocking || this.stun > 0) return;
     this.start('dodge');
-    this.invuln = 0.3;
-    this._dodgeDir = dirVec.clone().normalize();
+    this.invuln = 0.32;
+    const d = dirVec.clone().normalize();
+    this._dodgeDir = d;
+    this.rig.impulseAll(d.x * 4.5, 1.2, d.z * 4.5);
   }
 
   update(dt, moveInput, running) {
     const e = this.engine;
-    if (this.hitstop > 0) { // impact-freeze: alles staat stil, shake verkoopt de klap
+    const groundY = e.groundHeight(this.ctrl.x, this.ctrl.z) ?? this.rig.groundY;
+
+    if (this.hitstop > 0) { // impact-freeze: physics staat stil
       this.hitstop -= dt;
-      this.j.torso.position.x = (Math.random() - 0.5) * 0.05;
-      if (this.hitstop <= 0) this.j.torso.position.x = 0;
       return;
     }
 
-    if (this.downT !== null) { // knock-down: kantelen + ledematen verslappen
-      this.downT = Math.min(1, this.downT + dt * 2.0);
-      const f = EASE.out(this.downT);
-      this.root.rotation.z = (Math.PI / 2) * f * this._fallSide;
-      this.root.position.y += ((this.groundY() + 0.22) - this.root.position.y) * 0.18;
-      if (this.slump) {
-        for (const name of JOINTS) {
-          const g = this.j[name];
-          g.rotation.x += (this.slump[name][0] - g.rotation.x) * dt * 4;
-          g.rotation.z += (this.slump[name][2] - g.rotation.z) * dt * 4;
-        }
-      }
+    if (this.downT !== null) { // knock-out: pure ragdoll
+      this.downT = Math.min(1, this.downT + dt);
+      this.rig.muscleScale = Math.max(0, this.rig.muscleScale - dt * 8);
+      this.rig.step(dt, null, groundY);
+      this.position.copy(this.rig.point(P.pelvis));
       return;
     }
+
     this.invuln = Math.max(0, this.invuln - dt);
+    this.stun = Math.max(0, this.stun - dt);
 
-    // dodge verplaatst zelf
+    // dodge-verplaatsing
     if (this.move === MOVES.dodge && this._dodgeDir) {
-      const step = 5.2 * dt;
-      const origin = this.root.position.clone(); origin.y += 0.4;
+      const step = 4.6 * dt;
+      const origin = this.position.clone(); origin.y = groundY + 0.5;
       if (!e.castWall(origin, this._dodgeDir, step + 0.4)) {
-        this.root.position.addScaledVector(this._dodgeDir, step);
+        this.ctrl.x += this._dodgeDir.x * step;
+        this.ctrl.z += this._dodgeDir.z * step;
       }
     }
 
     let speed = 0;
-    if (moveInput.lengthSq() > 0.001 && !this.move && !this.blocking) {
+    if (moveInput.lengthSq() > 0.001 && !this.move && !this.blocking && this.stun <= 0) {
       speed = running ? RUN : WALK;
-      const origin = this.root.position.clone(); origin.y += 0.2;
+      const origin = this.position.clone(); origin.y = groundY + 0.5;
       if (!e.castWall(origin, moveInput, speed * dt + 0.45)) {
-        this.root.position.addScaledVector(moveInput, speed * dt);
+        this.ctrl.x += moveInput.x * speed * dt;
+        this.ctrl.z += moveInput.z * speed * dt;
       }
-      this.heading = Math.atan2(moveInput.x, moveInput.z);
+      const want = Math.atan2(moveInput.x, moveInput.z);
+      this.heading += shortestAngle(this.heading, want) * Math.min(1, dt * 10);
     }
 
-    const g = this.groundY();
-    this.root.position.y += ((g + 0.95) - this.root.position.y) * Math.min(1, dt * 14);
-    this.root.rotation.y += shortestAngle(this.root.rotation.y, this.heading) * Math.min(1, dt * 14);
+    // pose bepalen: move-clip of loop/idle-cycle
+    let pose, bob = 0;
+    this.rig.setBoost(null, 1);
+    this.rig.muscleScale = this.stun > 0 ? 0.4 : 1;
 
     if (this.move) {
       const m = this.move;
       this.moveT += dt / m.dur;
-      // root motion: gewicht/uitval in de slag, met muurcheck
       const rootNow = sampleCurve(m.root, Math.min(1, this.moveT));
       const delta = rootNow - this.prevRoot;
       this.prevRoot = rootNow;
       if (delta > 0) {
-        const fwd = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
-        const origin = this.root.position.clone(); origin.y += 0.4;
-        if (!e.castWall(origin, fwd, delta + 0.4)) this.root.position.addScaledVector(fwd, delta);
+        const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+        const origin = this.position.clone(); origin.y = groundY + 0.5;
+        if (!e.castWall(origin, new THREE.Vector3(fx, 0, fz), delta + 0.4)) {
+          this.ctrl.x += fx * delta; this.ctrl.z += fz * delta;
+        }
       }
-      if (m.spin) this.heading += m.spin * dt / m.dur; // tornado draait door
+      if (m.spin) this.heading += m.spin * dt / m.dur;
 
       if (this.moveT >= 1) {
         this.move = null;
         if (this.queued) { const q = this.queued; this.queued = null; this.start(q); }
+        pose = {};
       } else {
-        driveJoints(this.j, samplePose(m, this.moveT), dt);
-        return;
+        pose = samplePose(m, this.moveT);
+        if (m.limb) this.rig.setBoost(LIMBS[m.limb], 2.6); // snap in de slag
       }
     }
 
-    if (this.blocking) { driveJoints(this.j, samplePose(MOVES.block, 0.5), dt); return; }
+    if (!pose) {
+      if (this.blocking) {
+        pose = samplePose(MOVES.block, 0.5);
+        this.rig.setBoost([...LIMBS.armL, ...LIMBS.armR], 2.0);
+      } else {
+        this.walkPhase += dt * (speed > 0 ? speed * 2.3 : 0);
+        const ph = this.walkPhase;
+        const amp = speed > 0 ? (running ? 0.9 : 0.62) : 0;
+        const breathe = Math.sin(performance.now() / 650) * 0.035;
+        pose = {
+          hL: [Math.sin(ph) * amp, 0, 0],
+          hR: [-Math.sin(ph) * amp, 0, 0],
+          kL: [Math.max(0, -Math.sin(ph)) * amp * 1.5, 0, 0],
+          kR: [Math.max(0, Math.sin(ph)) * amp * 1.5, 0, 0],
+          sL: [-Math.sin(ph) * amp * 0.75 - 0.1, 0, 0.12 + breathe],
+          sR: [Math.sin(ph) * amp * 0.75 - 0.1, 0, -0.12 - breathe],
+          eL: [-0.4 - Math.max(0, Math.sin(ph)) * amp * 0.45, 0, 0],
+          eR: [-0.4 - Math.max(0, -Math.sin(ph)) * amp * 0.45, 0, 0],
+          torso: [speed > 0 ? 0.14 : 0.02 + breathe * 0.6, 0, 0],
+          head: [breathe * 0.5, 0, 0],
+        };
+        bob = speed > 0 ? Math.abs(Math.cos(ph)) * 0.05 : 0;
+        if (running) this.rig.relaxArms(0.55); // losse armen = Stick Fight-zwier
+      }
+    }
 
-    // idle/loop-cycle met ademhaling
-    this.walkPhase += dt * (speed > 0 ? speed * 2.3 : 0);
-    const ph = this.walkPhase;
-    const amp = speed > 0 ? (running ? 0.9 : 0.62) : 0;
-    const breathe = Math.sin(performance.now() / 650) * 0.035;
-    driveJoints(this.j, {
-      hL: [Math.sin(ph) * amp, 0, 0],
-      hR: [-Math.sin(ph) * amp, 0, 0],
-      kL: [Math.max(0, -Math.sin(ph)) * amp * 1.5, 0, 0],
-      kR: [Math.max(0, Math.sin(ph)) * amp * 1.5, 0, 0],
-      sL: [-Math.sin(ph) * amp * 0.75 - 0.1, 0, 0.12 + breathe],
-      sR: [Math.sin(ph) * amp * 0.75 - 0.1, 0, -0.12 - breathe],
-      eL: [-0.4 - Math.max(0, Math.sin(ph)) * amp * 0.45, 0, 0],
-      eR: [-0.4 - Math.max(0, -Math.sin(ph)) * amp * 0.45, 0, 0],
-      torso: [speed > 0 ? 0.14 : 0.02 + breathe * 0.6, 0, 0],
-      head: [breathe * 0.5, 0, 0],
-    }, dt);
-    if (speed > 0) this.root.position.y += Math.abs(Math.cos(ph)) * 0.035;
+    computeTargets(pose, this.heading, this.ctrl.x, this.ctrl.z, groundY, this.targets, bob);
+    this.rig.step(dt, this.targets, groundY);
+    this.position.copy(this.rig.point(P.pelvis));
+    // controller volgt het lijf een beetje (geduwd worden werkt dan ook door)
+    this.ctrl.x += (this.position.x - this.ctrl.x) * Math.min(1, dt * 3);
+    this.ctrl.z += (this.position.z - this.ctrl.z) * Math.min(1, dt * 3);
   }
 
-  groundY() {
-    return this.engine.groundHeight(this.root.position.x, this.root.position.z) ?? this.root.position.y - 0.95;
+  strikePoint(out) {
+    const m = this.move;
+    if (!m?.limb) return null;
+    const chain = LIMBS[m.limb];
+    return this.rig.point(chain[chain.length - 1], out);
   }
 
   strikes(target) {
@@ -274,42 +211,42 @@ export class Fighter {
     if (!m || this.hitDone || !m.reach) return false;
     if (this.moveT < m.hitFrom || this.moveT > m.hitTo) return false;
     if (target.invuln > 0 || target.downT !== null) return false;
-    const d = this.root.position.distanceTo(target.root.position);
-    if (d > m.reach) return false;
-    const dir = target.root.position.clone().sub(this.root.position).setY(0).normalize();
-    const facing = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
-    if (facing.dot(dir) < 0.25) return false;
+    if (this.position.distanceTo(target.position) > m.reach + 0.4) return false;
+    const sp = this.strikePoint(new THREE.Vector3());
+    if (!sp) return false;
+    // raak als de slaande hand/voet dicht bij romp of hoofd van het doel komt
+    const chest = target.rig.point(P.chest, new THREE.Vector3());
+    const head = target.rig.point(P.head, new THREE.Vector3());
+    const d = Math.min(sp.distanceTo(chest), sp.distanceTo(head));
+    if (d > 0.85) return false;
     this.hitDone = true;
     return true;
   }
 
   takeHit(m, from) {
-    if (this.blocking) { // blok: geen schade, kleine duw
-      const push = this.root.position.clone().sub(from.root.position).setY(0).normalize();
-      this.root.position.addScaledVector(push, 0.3);
+    const push = this.position.clone().sub(from.position).setY(0).normalize();
+    if (this.blocking) {
+      this.rig.impulseAll(push.x * 1.5, 0.3, push.z * 1.5);
       return 'blocked';
     }
     this.hp -= m.dmg;
     this.move = null; this.queued = null;
-    const push = this.root.position.clone().sub(from.root.position).setY(0).normalize();
-    this.root.position.addScaledVector(push, m.knockback ?? 0.5);
+    const kb = m.knockback ?? 0.5;
     if (this.hp <= 0) {
-      this.downT = 0;
-      this._fallSide = Math.random() < 0.5 ? 1 : -1;
-      this.slump = {}; // losse "ragdoll-achtige" eindhouding
-      for (const name of JOINTS) {
-        this.slump[name] = [(Math.random() - 0.5) * 1.4, 0, (Math.random() - 0.5) * 1.0];
-      }
+      this.downT = 0; // spieren uit: echte ragdoll-collapse met impuls mee
+      this.rig.impulseAll(push.x * (2.5 + kb * 2.2), 1.6 + kb, push.z * (2.5 + kb * 2.2));
+      this.rig.impulse(P.head, push.x * 4, 1.5, push.z * 4);
       return 'down';
     }
-    this.start(m.heavy ? 'hitHeavy' : 'hitLight');
+    this.stun = m.heavy ? 0.5 : 0.32;
+    // hoofd klapt weg, lijf wankelt mee — physics doet de reactie-animatie
+    this.rig.impulse(P.head, push.x * (3 + kb * 2), 0.8, push.z * (3 + kb * 2));
+    this.rig.impulse(P.chest, push.x * (1.5 + kb), 0.3, push.z * (1.5 + kb));
+    this.ctrl.x += push.x * kb * 0.5; this.ctrl.z += push.z * kb * 0.5;
     return 'hit';
   }
 
-  dispose() {
-    this.engine.scene.remove(this.root);
-    this.root.traverse((n) => { if (n.isMesh) { n.geometry.dispose(); n.material.dispose(); } });
-  }
+  dispose() { this.rig.dispose(); }
 }
 
 // --- impact-spark ---------------------------------------------------------------
@@ -337,7 +274,7 @@ function spark(engine, pos) {
 export function createFightMode(engine) {
   const { state, camera, hud } = engine;
   let player, dummies = [], goal, goalPos, done = false;
-  let prevA = false, prevB = false, prevDodge = false;
+  let prevA = false, prevB = false;
   let combo = 0, comboT = 0;
   let timeScale = 1, slowmoT = 0, camShake = 0, baseFov = camera.fov;
 
@@ -375,8 +312,7 @@ export function createFightMode(engine) {
       engine.scene.add(goal);
       engine.setWaypoint?.(goalPos, '🥋');
 
-      // statische trainingsdummies langs de route (AI komt later)
-      const from = player.root.position;
+      const from = player.position;
       for (let i = 1; i <= 7; i++) {
         const f = i / 8;
         const x = from.x + (goalPos.x - from.x) * f + (Math.random() - 0.5) * 60;
@@ -400,7 +336,6 @@ export function createFightMode(engine) {
 
     tick(rawDt) {
       if (done) return;
-      // bullet-time finisher: de wereld vertraagt, de HUD niet
       if (slowmoT > 0) {
         slowmoT -= rawDt;
         if (slowmoT <= 0) { timeScale = 1; camera.fov = baseFov; camera.updateProjectionMatrix(); }
@@ -416,7 +351,6 @@ export function createFightMode(engine) {
       );
       if (move.lengthSq() > 1) move.normalize();
 
-      // toetsen via de one-shot buffer (droppen nooit), knoppen edge-detected
       const a = state.actionA;
       const b = state.actionB;
       player.blocking = (state.actionC || state.keys.has('KeyL')) && !player.move;
@@ -427,14 +361,13 @@ export function createFightMode(engine) {
       }
       prevA = a; prevB = b;
 
-      // auto-richten op de dichtstbijzijnde staande dummy tijdens een aanval
       if (player.move && player.move.reach) {
         const near = dummies.filter((f) => f.downT === null)
-          .sort((x, y) => x.root.position.distanceTo(player.root.position) - y.root.position.distanceTo(player.root.position))[0];
-        if (near && near.root.position.distanceTo(player.root.position) < 3.5 && !player.move.spin) {
+          .sort((x, y) => x.position.distanceTo(player.position) - y.position.distanceTo(player.position))[0];
+        if (near && near.position.distanceTo(player.position) < 3.5 && !player.move.spin) {
           player.heading = Math.atan2(
-            near.root.position.x - player.root.position.x,
-            near.root.position.z - player.root.position.z);
+            near.position.x - player.position.x,
+            near.position.z - player.position.z);
         }
       }
 
@@ -443,20 +376,18 @@ export function createFightMode(engine) {
       comboT = Math.max(0, comboT - dt);
 
       for (const dummy of dummies) {
-        dummy.update(dt, new THREE.Vector3(), false); // statisch: alleen ademen/vallen
+        dummy.update(dt, new THREE.Vector3(), false);
         if (player.strikes(dummy)) {
           const m = player.move;
           const result = dummy.takeHit(m, player);
-          const mid = dummy.root.position.clone().lerp(player.root.position, 0.4);
-          mid.y += 1.2;
-          spark(engine, mid);
+          const sp = player.strikePoint(new THREE.Vector3()) ?? dummy.position.clone();
+          spark(engine, sp);
           player.hitstop = m.hitstop; dummy.hitstop = m.hitstop;
           camShake = m.heavy ? 0.35 : 0.18;
           combo += 1; comboT = 2.0;
 
           const standing = dummies.filter((f) => f.downT === null).length;
           if (result === 'down' && standing === 0) {
-            // laatste dummy: bullet-time + inzoomen
             timeScale = 0.18; slowmoT = 1.5;
             camera.fov = 44; camera.updateProjectionMatrix();
           }
@@ -464,7 +395,7 @@ export function createFightMode(engine) {
       }
 
       goal.rotation.y += dt * 0.6;
-      const gd = player.root.position.distanceTo(new THREE.Vector3(goalPos.x, player.root.position.y, goalPos.z));
+      const gd = player.position.distanceTo(new THREE.Vector3(goalPos.x, player.position.y, goalPos.z));
       if (gd < 6) {
         done = true;
         const downed = dummies.filter((f) => f.downT !== null).length;
@@ -475,9 +406,8 @@ export function createFightMode(engine) {
         hud('❤️'.repeat(PLAYER_HP), `🥋 baken: ${Math.round(gd)} m${comboTxt}`);
       }
 
-      // derde-persoons camera + impact-shake
       camShake = Math.max(0, camShake - rawDt * 1.6);
-      const pp = player.root.position;
+      const pp = player.position;
       const dist = 4.6, pitch = Math.max(-0.9, Math.min(0.5, state.pitch));
       camera.position.set(
         pp.x + Math.sin(state.yaw) * Math.cos(pitch) * dist + (Math.random() - 0.5) * camShake,

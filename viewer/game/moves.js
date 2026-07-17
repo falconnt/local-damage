@@ -14,7 +14,7 @@
 export const MOVES = {
   // --- stoot-keten (A A A) ---------------------------------------------------
   jab: {
-    dur: 0.32, hitFrom: 0.30, hitTo: 0.52, reach: 1.4, dmg: 1,
+    dur: 0.32, hitFrom: 0.30, hitTo: 0.52, reach: 1.4, dmg: 1, limb: 'armR',
     knockback: 0.35, hitstop: 0.07, chainFrom: 0.45, chainTo: 0.95, chainsTo: 'cross',
     root: [[0, 0], [0.4, 0.25], [1, 0.1]],
     frames: [
@@ -24,7 +24,7 @@ export const MOVES = {
     ],
   },
   cross: {
-    dur: 0.42, hitFrom: 0.32, hitTo: 0.55, reach: 1.5, dmg: 1,
+    dur: 0.42, hitFrom: 0.32, hitTo: 0.55, reach: 1.5, dmg: 1, limb: 'armL',
     knockback: 0.6, hitstop: 0.09, chainFrom: 0.5, chainTo: 0.95, chainsTo: 'backfist',
     root: [[0, 0], [0.45, 0.45], [1, 0.15]],
     frames: [
@@ -35,7 +35,7 @@ export const MOVES = {
     ],
   },
   backfist: {
-    dur: 0.6, hitFrom: 0.42, hitTo: 0.62, reach: 1.7, dmg: 2,
+    dur: 0.6, hitFrom: 0.42, hitTo: 0.62, reach: 1.7, dmg: 2, limb: 'armR',
     knockback: 1.4, hitstop: 0.13, heavy: true,
     root: [[0, 0], [0.5, 0.5], [1, 0.2]],
     frames: [
@@ -48,7 +48,7 @@ export const MOVES = {
 
   // --- trap-keten (B B B) ----------------------------------------------------
   frontkick: {
-    dur: 0.5, hitFrom: 0.36, hitTo: 0.58, reach: 1.8, dmg: 1,
+    dur: 0.5, hitFrom: 0.36, hitTo: 0.58, reach: 1.8, dmg: 1, limb: 'legR',
     knockback: 1.0, hitstop: 0.09, chainFrom: 0.55, chainTo: 0.95, chainsTo: 'roundhouse',
     root: [[0, 0], [0.45, 0.3], [1, 0.1]],
     frames: [
@@ -60,7 +60,7 @@ export const MOVES = {
     ],
   },
   roundhouse: {
-    dur: 0.62, hitFrom: 0.4, hitTo: 0.6, reach: 1.9, dmg: 2,
+    dur: 0.62, hitFrom: 0.4, hitTo: 0.6, reach: 1.9, dmg: 2, limb: 'legL',
     knockback: 1.6, hitstop: 0.12, heavy: true, chainFrom: 0.6, chainTo: 0.95, chainsTo: 'tornado',
     root: [[0, 0], [0.5, 0.35], [1, 0.1]],
     frames: [
@@ -71,7 +71,7 @@ export const MOVES = {
     ],
   },
   tornado: { // 540-achtige spinkick: de finisher-kandidaat van de keten
-    dur: 0.85, hitFrom: 0.5, hitTo: 0.7, reach: 2.0, dmg: 3,
+    dur: 0.85, hitFrom: 0.5, hitTo: 0.7, reach: 2.0, dmg: 3, limb: 'legR',
     knockback: 2.6, hitstop: 0.16, heavy: true, spin: Math.PI * 2,
     root: [[0, 0], [0.55, 0.7], [1, 0.25]],
     frames: [

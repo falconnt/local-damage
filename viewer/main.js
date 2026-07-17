@@ -719,6 +719,9 @@ async function startMode(name) {
   if (name === 'fight') {
     const { createFightMode } = await import('./game/stickman.js');
     activeMode = createFightMode(engine);
+  } else if (name === 'dojo') {
+    const { createDojoMode } = await import('./game/dojo.js');
+    activeMode = createDojoMode(engine);
   } else if (name === 'race') {
     const { createRaceMode } = await import('./game/race.js');
     activeMode = createRaceMode(engine);

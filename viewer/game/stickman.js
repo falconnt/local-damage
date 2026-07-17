@@ -134,11 +134,23 @@ export class Fighter {
       const want = Math.atan2(moveInput.x, moveInput.z);
       this.heading += shortestAngle(this.heading, want) * Math.min(1, dt * 10);
     }
+    // besturing mag nooit ver voor het lijf uitlopen, anders wordt de pop
+    // als een marionet vooruitgesleept (armen/benen bungelen erachteraan)
+    {
+      const dx = this.ctrl.x - this.position.x, dz = this.ctrl.z - this.position.z;
+      const lead = Math.hypot(dx, dz);
+      if (lead > 0.28) {
+        this.ctrl.x = this.position.x + (dx / lead) * 0.28;
+        this.ctrl.z = this.position.z + (dz / lead) * 0.28;
+      }
+    }
 
     // pose bepalen: move-clip of loop/idle-cycle
     let pose, bob = 0;
     this.rig.setBoost(null, 1);
-    this.rig.muscleScale = this.stun > 0 ? 0.4 : 1;
+    const targetMuscle = this.stun > 0 ? 0.4 : 1;
+    // zacht herstellen (o.a. na revive) zodat opstaan niet teleporteert
+    this.rig.muscleScale = Math.min(targetMuscle, this.rig.muscleScale + dt * 2.5);
 
     if (this.move) {
       const m = this.move;
@@ -172,22 +184,29 @@ export class Fighter {
       } else {
         this.walkPhase += dt * (speed > 0 ? speed * 2.3 : 0);
         const ph = this.walkPhase;
-        const amp = speed > 0 ? (running ? 0.9 : 0.62) : 0;
+        const amp = speed > 0 ? (running ? 0.95 : 0.62) : 0;
         const breathe = Math.sin(performance.now() / 650) * 0.035;
+        // rennen: gebogen, pompende armen (geen slungel-armen)
+        const armPump = running && speed > 0 ? 1.15 : 0.75;
+        const elbowBend = running && speed > 0 ? -1.5 : -0.4;
         pose = {
           hL: [Math.sin(ph) * amp, 0, 0],
           hR: [-Math.sin(ph) * amp, 0, 0],
           kL: [Math.max(0, -Math.sin(ph)) * amp * 1.5, 0, 0],
           kR: [Math.max(0, Math.sin(ph)) * amp * 1.5, 0, 0],
-          sL: [-Math.sin(ph) * amp * 0.75 - 0.1, 0, 0.12 + breathe],
-          sR: [Math.sin(ph) * amp * 0.75 - 0.1, 0, -0.12 - breathe],
-          eL: [-0.4 - Math.max(0, Math.sin(ph)) * amp * 0.45, 0, 0],
-          eR: [-0.4 - Math.max(0, -Math.sin(ph)) * amp * 0.45, 0, 0],
-          torso: [speed > 0 ? 0.14 : 0.02 + breathe * 0.6, 0, 0],
+          sL: [-Math.sin(ph) * amp * armPump - 0.1, 0, 0.12 + breathe],
+          sR: [Math.sin(ph) * amp * armPump - 0.1, 0, -0.12 - breathe],
+          eL: [elbowBend - Math.max(0, Math.sin(ph)) * amp * 0.4, 0, 0],
+          eR: [elbowBend - Math.max(0, -Math.sin(ph)) * amp * 0.4, 0, 0],
+          torso: [speed > 0 ? (running ? 0.22 : 0.14) : 0.02 + breathe * 0.6, 0, 0],
           head: [breathe * 0.5, 0, 0],
         };
         bob = speed > 0 ? Math.abs(Math.cos(ph)) * 0.05 : 0;
-        if (running) this.rig.relaxArms(0.55); // losse armen = Stick Fight-zwier
+        if (speed > 0) {
+          // strakke ledematen tijdens het lopen: stappen en armzwaai volgen crisp
+          this.rig.setBoost([...LIMBS.legL, ...LIMBS.legR], 1.6);
+          for (const i of [...LIMBS.armL, ...LIMBS.armR]) this.rig.boost[i] = 1.3;
+        }
       }
     }
 
@@ -246,11 +265,37 @@ export class Fighter {
     return 'hit';
   }
 
+  revive() { // dojo: dummy krabbelt overeind (spieren komen terug)
+    this.downT = null;
+    this.hp = DUMMY_HP;
+    this.stun = 0.4;
+    this.rig.muscleScale = 0.01; // update-loop trekt hem naar 1
+    const p = this.rig.point(P.pelvis, new THREE.Vector3());
+    this.ctrl.x = p.x; this.ctrl.z = p.z;
+  }
+
   dispose() { this.rig.dispose(); }
 }
 
+export const DUMMY_MAX_HP = DUMMY_HP;
+
+// lijf-tegen-lijf: vechters duwen elkaar opzij i.p.v. door elkaar heen lopen
+export function separate(a, b) {
+  if (a.downT !== null || b.downT !== null) return;
+  const dx = b.position.x - a.position.x;
+  const dz = b.position.z - a.position.z;
+  const d = Math.hypot(dx, dz);
+  if (d > 0.68 || d < 1e-4) return;
+  const push = (0.68 - d) / 2;
+  const nx = dx / d, nz = dz / d;
+  a.ctrl.x -= nx * push; a.ctrl.z -= nz * push;
+  b.ctrl.x += nx * push; b.ctrl.z += nz * push;
+  a.rig.impulse(P.chest, -nx * 0.6, 0, -nz * 0.6);
+  b.rig.impulse(P.chest, nx * 0.6, 0, nz * 0.6);
+}
+
 // --- impact-spark ---------------------------------------------------------------
-function spark(engine, pos) {
+export function spark(engine, pos) {
   const m = new THREE.Mesh(
     new THREE.PlaneGeometry(0.5, 0.5),
     new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.95, depthWrite: false })
@@ -377,6 +422,7 @@ export function createFightMode(engine) {
 
       for (const dummy of dummies) {
         dummy.update(dt, new THREE.Vector3(), false);
+        separate(player, dummy);
         if (player.strikes(dummy)) {
           const m = player.move;
           const result = dummy.takeHit(m, player);

@@ -20,7 +20,9 @@ export function createRaceMode(engine) {
   const PHY = spec.physics;
   let car, wheels, goal, goalPos;
   let v = 0, heading = 0, t0 = 0, done = false, steerVis = 0;
+  let steerCur = 0, camYaw = 0;
   let boostTank = 1, boostLock = false, baseFov = camera.fov;
+  const wheelbase = Math.abs(spec.wheels[0].z - spec.wheels[1].z);
 
   function findRoadNear(x, z, maxR = 140) {
     // spiraal-samples tot we een wegcel vinden
@@ -78,6 +80,9 @@ export function createRaceMode(engine) {
         if (score > bestScore) { bestScore = score; heading = h; }
       }
       car.rotation.y = heading;
+      camYaw = heading; steerCur = 0; steerVis = 0;
+      // camera meteen op zijn volgplek zetten (geen lange zwiep bij de start)
+      camera.position.set(sx - Math.sin(heading) * 10, g + 4.2, sz - Math.cos(heading) * 10);
       goalPos = new THREE.Vector3(gx, engine.groundHeight(gx, gz) ?? 0, gz);
       goal = new THREE.Mesh(
         new THREE.CylinderGeometry(3.2, 3.2, 60, 16, 1, true),
@@ -143,10 +148,19 @@ export function createRaceMode(engine) {
       v = Math.max(-PHY.revMax, Math.min(v, cap)); // te snel voor deze ondergrond: hard afremmen
       if (Math.abs(v) < 0.02 && !throttle && !brake) v = 0;
 
-      // sturen: effect groeit met snelheid; in z'n achteruit draait het stuur mee
-      const steerClamped = Math.max(-1, Math.min(1, steer));
-      heading -= steerClamped * Math.min(1, Math.abs(v) / 9) * PHY.steer * dt * Math.sign(v || 1);
-      steerVis += (steerClamped - steerVis) * Math.min(1, dt * 10);
+      // sturen als een echte auto (fietsmodel): het stuur draait geleidelijk in,
+      // de uitslag wordt kleiner bij hoge snelheid en de grip begrenst hoe snel
+      // de neus kan draaien — geen "om zijn as schieten" meer
+      const steerT = Math.max(-1, Math.min(1, steer));
+      const rate = Math.abs(steerT) > Math.abs(steerCur) ? 2.8 : 6; // loslaten = sneller terug
+      steerCur += Math.max(-rate * dt, Math.min(rate * dt, steerT - steerCur));
+      const angle = steerCur * PHY.steer / (1 + Math.abs(v) / 15);
+      let yawRate = (v / wheelbase) * Math.tan(angle);
+      const grip = PHY.grip * (cls === 'road' ? 1 : 0.7);
+      const yawCap = grip / Math.max(3, Math.abs(v)); // laterale g-limiet
+      yawRate = Math.max(-yawCap, Math.min(yawCap, yawRate));
+      heading -= yawRate * dt;
+      steerVis += (steerCur - steerVis) * Math.min(1, dt * 10);
 
       const dir = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
       const step = v * dt;
@@ -166,7 +180,7 @@ export function createRaceMode(engine) {
 
       for (const w of wheels) {
         w.mesh.rotation.x += (v / w.r) * dt;
-        if (w.front) w.pivot.rotation.y = -steerVis * 0.45;
+        if (w.front) w.pivot.rotation.y = -steerVis * PHY.steer;
       }
       engine.sfx?.engineUpdate(v * (boosting ? 1.3 : 1));
 
@@ -196,12 +210,22 @@ export function createRaceMode(engine) {
         setTimeout(() => engine.showMenu(), 3200);
       }
 
-      // chase-cam achter de auto
-      const back = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading));
-      const camT = car.position.clone().addScaledVector(back, 7.5);
-      camT.y = car.position.y + 3.2;
-      camera.position.lerp(camT, Math.min(1, dt * 5));
-      camera.lookAt(car.position.x, car.position.y + 1.0, car.position.z);
+      // losse chase-cam: hangt verder weg en draait traag achter de auto aan,
+      // zodat de wereld niet 1-op-1 meezwiept met elke stuurbeweging
+      const yawErr = Math.atan2(Math.sin(heading - camYaw), Math.cos(heading - camYaw));
+      camYaw += yawErr * Math.min(1, dt * 2.2);
+      const dist = 10 + Math.abs(v) * 0.12;
+      const back = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+      const camT = car.position.clone().addScaledVector(back, dist);
+      camT.y = car.position.y + 4.2 + Math.abs(v) * 0.05;
+      camera.position.lerp(camT, Math.min(1, dt * 3.5));
+      // kijk iets vóór de auto uit, dan is de rijlijn beter in te schatten
+      const lead = Math.max(0, v) * 0.35;
+      camera.lookAt(
+        car.position.x + Math.sin(heading) * lead,
+        car.position.y + 1.1,
+        car.position.z + Math.cos(heading) * lead
+      );
     },
   };
 }

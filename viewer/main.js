@@ -18,6 +18,8 @@ const state = {
   paletteName: 'afternoon',
   palettes: {},
   fogScale: 1,
+  labels: 'all',      // 'all' | 'signs' | 'none' — per kwaliteitsniveau
+  showTrees: true,
   yaw: 0,
   pitch: -0.05,
   velocity: new THREE.Vector3(),
@@ -45,9 +47,10 @@ const SURFACE_CLASSES = new Set(['grass', 'road', 'water', 'sand', 'green', 'gro
 // 'auto' kiest een startniveau op basis van het apparaat en meet daarna de
 // framerate: schokt het, dan schakelt hij vanzelf een stap terug (en onthoudt dat).
 const QUALITY = {
-  low:  { label: 'laag',   pr: 1.0, shadows: false, shadowRes: 1024, fogScale: 0.55, far: 900,  load: 460, unload: 700, aa: false },
-  mid:  { label: 'middel', pr: 1.5, shadows: false, shadowRes: 1024, fogScale: 0.85, far: 1600, load: 620, unload: 900, aa: true },
-  high: { label: 'hoog',   pr: 2.0, shadows: true,  shadowRes: 2048, fogScale: 1.0,  far: 3000, load: 700, unload: 950, aa: true },
+  //         resolutie  schaduw          zicht  tegels        anti-  bordjes  bomen
+  low:  { label: 'laag',   pr: 0.67, shadows: false, shadowRes: 1024, fogScale: 0.5,  far: 700,  load: 300, unload: 520, aa: false, labels: 'none',  trees: false },
+  mid:  { label: 'middel', pr: 1.25, shadows: false, shadowRes: 1024, fogScale: 0.8,  far: 1300, load: 560, unload: 820, aa: true,  labels: 'signs', trees: true },
+  high: { label: 'hoog',   pr: 2.0,  shadows: true,  shadowRes: 2048, fogScale: 1.0,  far: 3000, load: 700, unload: 950, aa: true,  labels: 'all',   trees: true },
 };
 const Q_ORDER = ['low', 'mid', 'high'];
 let TILE_LOAD_M = 700;   // laden ruim achter de fog-grens: pop-in blijft onzichtbaar
@@ -58,7 +61,7 @@ function autoGuessLevel() {
   if (stored && QUALITY[stored]) return stored;
   const mem = navigator.deviceMemory ?? 8;
   const cores = navigator.hardwareConcurrency ?? 8;
-  if (isTouchDevice()) return (mem <= 3 || cores <= 4) ? 'low' : 'mid';
+  if (isTouchDevice()) return (mem <= 4 || cores <= 6) ? 'low' : 'mid';
   return 'high';
 }
 
@@ -119,6 +122,9 @@ function applyQuality(level) {
   const q = QUALITY[level];
   qualityLevel = level;
   state.fogScale = q.fogScale;
+  state.labels = q.labels;
+  state.showTrees = q.trees;
+  applyLabelDetail();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pr));
   const shadowChanged = renderer.shadowMap.enabled !== q.shadows;
   renderer.shadowMap.enabled = q.shadows;
@@ -151,8 +157,6 @@ function setQualityPref(pref) {
     b.classList.toggle('active', b.dataset.q === pref));
 }
 
-applyQuality(qualityLevel);
-
 // 3-staps toon-gradient ("flatter coloring", geen PBR)
 const gradientMap = new THREE.DataTexture(new Uint8Array([90, 165, 255]), 3, 1, THREE.RedFormat);
 gradientMap.minFilter = gradientMap.magFilter = THREE.NearestFilter;
@@ -171,6 +175,7 @@ async function init() {
   document.getElementById('menu-version').textContent = VERSION;
   state.palettes = await (await fetch('./palettes/palettes.json')).json();
   buildPaletteButtons();
+  applyQuality(qualityLevel); // nu bestaan labelState/state: veilig toe te passen
 
   // schaduwbox volgt de speler (vaste maat), zon-target wordt per frame gezet
   Object.assign(sun.shadow.camera, { left: -380, right: 380, top: 380, bottom: -380, far: 2500 });
@@ -249,6 +254,7 @@ async function initLegacyArea(base, area) {
     try {
       const labels = await (await fetch(base + area.addresses)).json();
       buildLabels(labels, 0, 0);
+      applyLabelDetail();
     } catch (err) {
       console.warn('adresbordjes niet geladen:', err);
     }
@@ -324,6 +330,7 @@ async function loadTile(rec, progressLabel = null) {
         console.warn('bordjes niet geladen voor', e.id, err);
       }
     }
+    applyLabelDetail(); // nieuw geladen bordjes/bomen meteen op het kwaliteitsniveau zetten
     rec.state = 'loaded';
   } catch (err) {
     console.warn('tegel laden mislukt:', rec.entry.id, err);
@@ -497,18 +504,36 @@ function buildLabels(data, ox = 0, oz = 0) {
 let labelTick = 0;
 function updateLabelVisibility() {
   const p = camera.position;
-  // straatnamen elke frame herschalen: constante schermgrootte
-  for (const s of labelState.streets) {
-    const d = s.position.distanceTo(p);
-    const h = THREE.MathUtils.clamp(d * 0.055, 3.5, 26);
-    s.scale.set(h * s.userData.aspect, h, 1);
-    s.material.opacity = d < 46 ? 0 : 0.92; // vlak eronder: niet in je gezicht
+  // zwevende straatnamen: alleen bij 'hoog' (op lagere niveaus scheelt dit
+  // sprites herschalen per frame). Wel altijd de tegels blijven streamen.
+  if (state.labels === 'all') {
+    for (const s of labelState.streets) {
+      const d = s.position.distanceTo(p);
+      const h = THREE.MathUtils.clamp(d * 0.055, 3.5, 26);
+      s.scale.set(h * s.userData.aspect, h, 1);
+      s.material.opacity = d < 46 ? 0 : 0.92; // vlak eronder: niet in je gezicht
+    }
   }
-  // huisnummers alleen dichtbij tonen; straatnaamborden dragen verder
   if (++labelTick % 30 !== 0) return;
-  for (const m of labelState.numbers) m.visible = m.position.distanceToSquared(p) < 70 * 70;
-  for (const m of labelState.signs) m.visible = m.position.distanceToSquared(p) < 220 * 220;
+  // huisnummers alleen dichtbij en alleen bij 'hoog'; borden bij 'middel'+
+  if (state.labels === 'all') {
+    for (const m of labelState.numbers) m.visible = m.position.distanceToSquared(p) < 70 * 70;
+  }
+  if (state.labels !== 'none') {
+    for (const m of labelState.signs) m.visible = m.position.distanceToSquared(p) < 220 * 220;
+  }
   updateTiles(); // zelfde ritme (~2x/s): buurtegels streamen voor je ze ziet
+}
+
+// bordjes/bomen aan of uit zetten voor het huidige kwaliteitsniveau
+function applyLabelDetail() {
+  const mode = state.labels; // 'all' | 'signs' | 'none'
+  for (const m of labelState.numbers) m.visible = mode === 'all' && m.visible;
+  for (const s of labelState.signs) s.visible = mode !== 'none';
+  for (const s of labelState.streets) s.visible = mode === 'all';
+  for (const meshes of [state.classMeshes.get('tree'), state.classMeshes.get('trunk')]) {
+    if (meshes) for (const m of meshes) m.visible = state.showTrees;
+  }
 }
 
 // --- stijl / paletten -------------------------------------------------------
@@ -708,7 +733,13 @@ function setupControls() {
 }
 
 const clampPitch = (p) => Math.max(-1.45, Math.min(1.45, p));
-function isTouchDevice() { return 'ontouchstart' in window && navigator.maxTouchPoints > 0; }
+function isTouchDevice() {
+  // robuust: sommige telefoon-browsers zetten 'ontouchstart' niet op window.
+  // een grof aanwijsapparaat (vinger) of >0 touchpunten telt als telefoon/tablet.
+  return (navigator.maxTouchPoints ?? 0) > 0
+    || window.matchMedia?.('(pointer: coarse)').matches
+    || 'ontouchstart' in window;
+}
 
 // --- loop -------------------------------------------------------------------
 const raycaster = new THREE.Raycaster();
@@ -878,11 +909,11 @@ function tick() {
     if (fpsWarmup > 0) { fpsWarmup -= rawDt; }
     else {
       fpsTime += rawDt; fpsFrames += 1;
-      if (fpsTime >= 4) {
+      if (fpsTime >= 2) {
         const fps = fpsFrames / fpsTime;
         fpsTime = 0; fpsFrames = 0;
         const i = Q_ORDER.indexOf(qualityLevel);
-        if (fps < 27 && i > 0) {
+        if (fps < 30 && i > 0) { // schokt het: meteen een niveau terug
           applyQuality(Q_ORDER[i - 1]);
           localStorage.setItem('ld-quality-auto', Q_ORDER[i - 1]); // volgende start meteen goed (incl. AA)
         }
@@ -963,6 +994,7 @@ window.__ld = {
   camera, state, labelState, engine, startMode, getMode: () => activeMode,
   quality: () => ({ pref: qualityPref, level: qualityLevel, pr: renderer.getPixelRatio(),
     shadows: renderer.shadowMap.enabled, far: camera.far, load: TILE_LOAD_M, fog: scene.fog?.far }),
+  renderer, applyQuality: (l) => applyQuality(l), setQualityPref: (p) => setQualityPref(p),
 };
 
 window.addEventListener('resize', () => {

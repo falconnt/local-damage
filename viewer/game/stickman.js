@@ -167,13 +167,20 @@ export class Fighter {
       }
       if (m.spin) this.heading += m.spin * dt / m.dur;
 
-      if (this.moveT >= 1) {
+      // combo cancelt direct het cancel-venster in (geen wachten op recovery)
+      if (this.queued && this.moveT >= (m.chainFrom ?? 1)) {
+        const q = this.queued; this.queued = null;
+        this.start(q);
+        pose = samplePose(this.move, 0);
+      } else if (this.moveT >= 1) {
         this.move = null;
-        if (this.queued) { const q = this.queued; this.queued = null; this.start(q); }
         pose = {};
       } else {
         pose = samplePose(m, this.moveT);
-        if (m.limb) this.rig.setBoost(LIMBS[m.limb], 2.6); // snap in de slag
+      }
+      if (this.move?.limb) {
+        this.rig.setBoost(LIMBS[this.move.limb], 3.4); // snap in de slag
+        this.rig.boost[1] = 1.6; // borst whipt mee (P.chest)
       }
     }
 

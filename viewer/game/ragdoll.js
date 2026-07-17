@@ -41,13 +41,13 @@ const CONSTRAINTS = [
 // strak genoeg om de pose geloofwaardig te houden (Stick Fight-poppen staan
 // stevig); de wiebel komt van impacts, rennen (losse armen) en reacties
 const MUSCLE = new Float32Array(NUM);
-MUSCLE[P.pelvis] = 320; MUSCLE[P.chest] = 300; MUSCLE[P.neck] = 240; MUSCLE[P.head] = 170;
-MUSCLE[P.shL] = MUSCLE[P.shR] = 240;
-MUSCLE[P.elL] = MUSCLE[P.elR] = 150;
-MUSCLE[P.haL] = MUSCLE[P.haR] = 120;
-MUSCLE[P.hiL] = MUSCLE[P.hiR] = 260;
-MUSCLE[P.knL] = MUSCLE[P.knR] = 200;
-MUSCLE[P.ftL] = MUSCLE[P.ftR] = 340;
+MUSCLE[P.pelvis] = 400; MUSCLE[P.chest] = 380; MUSCLE[P.neck] = 300; MUSCLE[P.head] = 220;
+MUSCLE[P.shL] = MUSCLE[P.shR] = 320;
+MUSCLE[P.elL] = MUSCLE[P.elR] = 220;
+MUSCLE[P.haL] = MUSCLE[P.haR] = 170;
+MUSCLE[P.hiL] = MUSCLE[P.hiR] = 340;
+MUSCLE[P.knL] = MUSCLE[P.knR] = 290;
+MUSCLE[P.ftL] = MUSCLE[P.ftR] = 420;
 
 // ledemaat-groepen voor strike-versterking (snap in de slag)
 export const LIMBS = {
@@ -158,7 +158,7 @@ export class Ragdoll {
         ay += -GRAV * Math.min(1, this.muscleScale);
       }
       // verlet-integratie met demping (kritisch-achtig gedempt bij aandrijving)
-      const damp = targets && this.muscleScale > 0.5 ? 0.965 : 0.985;
+      const damp = targets && this.muscleScale > 0.5 ? 0.94 : 0.985;
       let nx = this.pos[ix] + (this.pos[ix] - this.prev[ix]) * damp + ax * h2;
       let ny = this.pos[iy] + (this.pos[iy] - this.prev[iy]) * damp + ay * h2;
       let nz = this.pos[iz] + (this.pos[iz] - this.prev[iz]) * damp + az * h2;

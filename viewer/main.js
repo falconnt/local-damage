@@ -17,6 +17,7 @@ const FLY_FAST = 45.0;
 const state = {
   paletteName: 'afternoon',
   palettes: {},
+  fogScale: 1,
   yaw: 0,
   pitch: -0.05,
   velocity: new THREE.Vector3(),
@@ -39,12 +40,36 @@ const state = {
 
 const SURFACE_CLASSES = new Set(['grass', 'road', 'water', 'sand', 'green', 'ground']);
 
+// --- grafische kwaliteit -----------------------------------------------------
+// presets: pixelratio, schaduwen, zicht (fog/far/sky) en streaming-afstanden.
+// 'auto' kiest een startniveau op basis van het apparaat en meet daarna de
+// framerate: schokt het, dan schakelt hij vanzelf een stap terug (en onthoudt dat).
+const QUALITY = {
+  low:  { label: 'laag',   pr: 1.0, shadows: false, shadowRes: 1024, fogScale: 0.55, far: 900,  load: 460, unload: 700, aa: false },
+  mid:  { label: 'middel', pr: 1.5, shadows: false, shadowRes: 1024, fogScale: 0.85, far: 1600, load: 620, unload: 900, aa: true },
+  high: { label: 'hoog',   pr: 2.0, shadows: true,  shadowRes: 2048, fogScale: 1.0,  far: 3000, load: 700, unload: 950, aa: true },
+};
+const Q_ORDER = ['low', 'mid', 'high'];
+let TILE_LOAD_M = 700;   // laden ruim achter de fog-grens: pop-in blijft onzichtbaar
+let TILE_UNLOAD_M = 950; // ver weg = geheugen teruggeven (beide via applyQuality)
+
+function autoGuessLevel() {
+  const stored = localStorage.getItem('ld-quality-auto'); // eerder gemeten niveau
+  if (stored && QUALITY[stored]) return stored;
+  const mem = navigator.deviceMemory ?? 8;
+  const cores = navigator.hardwareConcurrency ?? 8;
+  if (isTouchDevice()) return (mem <= 3 || cores <= 4) ? 'low' : 'mid';
+  return 'high';
+}
+
+let qualityPref = localStorage.getItem('ld-quality') ?? 'auto';
+if (qualityPref !== 'auto' && !QUALITY[qualityPref]) qualityPref = 'auto';
+let qualityLevel = qualityPref === 'auto' ? autoGuessLevel() : qualityPref;
+
 // --- renderer / scene ------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-// telefoons met DPR 3 renderen anders 9x zoveel pixels; 1.75 is daar zat
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice() ? 1.75 : 2));
+// antialias staat vast na aanmaak: bepaald door het startniveau
+const renderer = new THREE.WebGLRenderer({ antialias: QUALITY[qualityLevel].aa });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = !isTouchDevice();
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('app').appendChild(renderer.domElement);
 
@@ -89,6 +114,45 @@ const sky = new THREE.Mesh(
 sky.name = 'sky';
 scene.add(sky);
 
+// kwaliteitsniveau toepassen op renderer, licht, zicht en streaming
+function applyQuality(level) {
+  const q = QUALITY[level];
+  qualityLevel = level;
+  state.fogScale = q.fogScale;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pr));
+  const shadowChanged = renderer.shadowMap.enabled !== q.shadows;
+  renderer.shadowMap.enabled = q.shadows;
+  sun.castShadow = q.shadows;
+  if (sun.shadow.mapSize.x !== q.shadowRes) {
+    sun.shadow.mapSize.set(q.shadowRes, q.shadowRes);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+  }
+  if (shadowChanged) scene.traverse((n) => { if (n.isMesh) n.material.needsUpdate = true; });
+  camera.far = q.far;
+  camera.updateProjectionMatrix();
+  sky.scale.setScalar(q.far / 3000); // skybol binnen het zichtbereik houden
+  TILE_LOAD_M = Math.min(q.load, q.far * 0.8);
+  TILE_UNLOAD_M = q.unload;
+  applyPalette(state.paletteName); // fog-afstanden volgen het niveau
+  const note = document.getElementById('q-note');
+  if (note) {
+    note.textContent = qualityPref === 'auto'
+      ? `auto meet de framerate — nu actief: ${q.label}`
+      : 'vast niveau — zet op auto om zelf te laten meten';
+  }
+}
+
+function setQualityPref(pref) {
+  qualityPref = pref;
+  localStorage.setItem('ld-quality', pref);
+  applyQuality(pref === 'auto' ? autoGuessLevel() : pref);
+  document.querySelectorAll('#quality button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.q === pref));
+}
+
+applyQuality(qualityLevel);
+
 // 3-staps toon-gradient ("flatter coloring", geen PBR)
 const gradientMap = new THREE.DataTexture(new Uint8Array([90, 165, 255]), 3, 1, THREE.RedFormat);
 gradientMap.minFilter = gradientMap.magFilter = THREE.NearestFilter;
@@ -101,8 +165,6 @@ init().catch((err) => {
 });
 
 const loader = new GLTFLoader();
-const TILE_LOAD_M = 700;   // laden ruim achter de fog-grens: pop-in blijft onzichtbaar
-const TILE_UNLOAD_M = 950; // ver weg = geheugen teruggeven
 
 async function init() {
   document.getElementById('version').textContent = VERSION;
@@ -457,7 +519,8 @@ function applyPalette(name) {
 
   skyUniforms.topColor.value.set(p.sky.top);
   skyUniforms.horizonColor.value.set(p.sky.horizon);
-  scene.fog = new THREE.Fog(new THREE.Color(p.fog.color), p.fog.near, p.fog.far);
+  const fs = state.fogScale ?? 1;
+  scene.fog = new THREE.Fog(new THREE.Color(p.fog.color), p.fog.near * fs, p.fog.far * fs);
 
   sun.color.set(p.sun.color);
   sun.intensity = p.sun.intensity;
@@ -518,6 +581,33 @@ function setupControls() {
   document.getElementById('menu-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     showMenu();
+  });
+
+  // instellingen: kwaliteitsknoppen + paneel openen/sluiten
+  const qHolder = document.getElementById('quality');
+  for (const [key, label] of [['auto', 'auto'], ['low', 'laag'], ['mid', 'middel'], ['high', 'hoog']]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.dataset.q = key;
+    b.addEventListener('click', (e) => { e.stopPropagation(); sfx.click(); setQualityPref(key); });
+    qHolder.appendChild(b);
+  }
+  document.querySelectorAll('#quality button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.q === qualityPref));
+  document.getElementById('settings-btn').addEventListener('click', (e) => {
+    e.stopPropagation(); sfx.click();
+    document.getElementById('modes').classList.add('hidden');
+    document.getElementById('car-select').classList.add('hidden');
+    document.getElementById('settings-btn').style.display = 'none';
+    document.getElementById('settings').classList.remove('hidden');
+    applyQuality(qualityLevel); // q-note verversen
+  });
+  document.getElementById('settings-back').addEventListener('click', (e) => {
+    e.stopPropagation(); sfx.click();
+    document.getElementById('settings').classList.add('hidden');
+    document.getElementById('settings-btn').style.display = '';
+    document.getElementById('modes').classList.remove('hidden');
   });
 
   // actieknoppen (mobiel): modes lezen state.actionA/actionB/actionC
@@ -709,6 +799,8 @@ function showMenu() {
   showActions(null);
   document.getElementById('menu-btn').style.display = 'none';
   document.getElementById('car-select').classList.add('hidden');
+  document.getElementById('settings').classList.add('hidden');
+  document.getElementById('settings-btn').style.display = '';
   document.getElementById('modes').classList.remove('hidden');
   document.getElementById('overlay').classList.remove('hidden');
   document.exitPointerLock?.();
@@ -776,8 +868,27 @@ async function startMode(name) {
 }
 
 const clock = new THREE.Clock();
+let fpsTime = 0, fpsFrames = 0, fpsWarmup = 5; // eerste seconden niet meten (laden)
 function tick() {
-  const dt = Math.min(clock.getDelta(), 0.1);
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.1);
+
+  // auto-kwaliteit: meet de echte framerate en schakel terug als het schokt
+  if (qualityPref === 'auto' && state.started) {
+    if (fpsWarmup > 0) { fpsWarmup -= rawDt; }
+    else {
+      fpsTime += rawDt; fpsFrames += 1;
+      if (fpsTime >= 4) {
+        const fps = fpsFrames / fpsTime;
+        fpsTime = 0; fpsFrames = 0;
+        const i = Q_ORDER.indexOf(qualityLevel);
+        if (fps < 27 && i > 0) {
+          applyQuality(Q_ORDER[i - 1]);
+          localStorage.setItem('ld-quality-auto', Q_ORDER[i - 1]); // volgende start meteen goed (incl. AA)
+        }
+      }
+    }
+  }
 
   if (state.started && activeMode) {
     activeMode.tick(dt); // spelmodus stuurt beweging én camera zelf
@@ -848,7 +959,11 @@ function tick() {
 }
 
 // debug/test-hook (harmloos in productie)
-window.__ld = { camera, state, labelState, engine, startMode, getMode: () => activeMode };
+window.__ld = {
+  camera, state, labelState, engine, startMode, getMode: () => activeMode,
+  quality: () => ({ pref: qualityPref, level: qualityLevel, pr: renderer.getPixelRatio(),
+    shadows: renderer.shadowMap.enabled, far: camera.far, load: TILE_LOAD_M, fog: scene.fog?.far }),
+};
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

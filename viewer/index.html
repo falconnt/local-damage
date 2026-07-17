@@ -73,11 +73,15 @@
     #hud { position: fixed; top: calc(0.7rem + env(safe-area-inset-top)); left: calc(0.9rem + env(safe-area-inset-left));
       z-index: 5; color: rgba(255,255,255,0.9);
       font-size: 0.8rem; letter-spacing: 0.25em; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
-    #palettes { position: fixed; top: calc(0.6rem + env(safe-area-inset-top)); right: calc(0.7rem + env(safe-area-inset-right));
-      z-index: 5; display: flex; gap: 0.4rem; }
-    #palettes button { border: 1px solid rgba(255,255,255,0.35); background: rgba(20,22,38,0.55);
+    #settings { display: flex; flex-direction: column; align-items: center; gap: 1.1rem; margin-top: 0.4rem; }
+    .set-group { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+    .set-label { margin: 0; font-size: 0.72rem; letter-spacing: 0.25em; opacity: 0.65; text-transform: uppercase; }
+    #palettes, #quality { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+    #palettes button, #quality button { border: 1px solid rgba(255,255,255,0.35); background: rgba(20,22,38,0.55);
       color: #fff; padding: 0.55rem 0.9rem; border-radius: 999px; font-size: 0.8rem; cursor: pointer; min-height: 2.4rem; }
-    #palettes button.active { background: rgba(255,255,255,0.85); color: #1a1d2a; }
+    #palettes button.active, #quality button.active { background: rgba(255,255,255,0.85); color: #1a1d2a; }
+    .q-note { width: 100%; text-align: center; font-size: 0.68rem; opacity: 0.6; margin: 0; }
+    #settings-btn, #settings-back { background: none; border: none; color: inherit; opacity: 0.7; font: inherit; cursor: pointer; }
 
     #footer { position: fixed; bottom: calc(0.45rem + env(safe-area-inset-bottom)); left: 0; right: 0; z-index: 5;
       text-align: center; color: rgba(255,255,255,0.55); font-size: 0.65rem; pointer-events: none; padding: 0 1rem; }
@@ -115,7 +119,6 @@
   <div id="grain"></div>
 
   <div id="hud">LOCAL DAMAGE</div>
-  <div id="palettes"></div>
 
   <div id="overlay">
     <img class="appicon" src="./icons/icon-192.png" alt="" />
@@ -146,6 +149,20 @@
       <div id="car-cards"></div>
       <button id="car-back" type="button">← terug</button>
     </div>
+    <div id="settings" class="hidden">
+      <p style="margin:0;letter-spacing:0.2em;opacity:0.8">INSTELLINGEN</p>
+      <div class="set-group">
+        <p class="set-label">sfeer</p>
+        <div id="palettes"></div>
+      </div>
+      <div class="set-group">
+        <p class="set-label">grafische kwaliteit</p>
+        <div id="quality"></div>
+        <p class="q-note" id="q-note"></p>
+      </div>
+      <button id="settings-back" type="button">← terug</button>
+    </div>
+    <button id="settings-btn" type="button">⚙️ instellingen</button>
     <p class="hint" id="start-hint"></p>
   </div>
 

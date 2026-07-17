@@ -195,18 +195,39 @@ def build_region(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
     log.info("regio %s gecentreerd op %s (RD %.0f, %.0f)", region_id, naam, x, y)
     tx0, ty0 = int(x // TILE_M), int(y // TILE_M)
 
+    # tegels van binnen naar buiten bouwen: de kern (spawn) eerst, zodat een
+    # afgebroken run altijd een bruikbaar centrum heeft
+    offsets = sorted(
+        ((dx, dy) for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)),
+        key=lambda o: max(abs(o[0]), abs(o[1])),
+    )
+
     tiles = []
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            tx, ty = tx0 + dx, ty0 + dy
-            tile_id = f"{region_id}_x{tx}_y{ty}"
-            bbox = [tx * TILE_M, ty * TILE_M, (tx + 1) * TILE_M, (ty + 1) * TILE_M]
+    failed = []
+    for dx, dy in offsets:
+        tx, ty = tx0 + dx, ty0 + dy
+        tile_id = f"{region_id}_x{tx}_y{ty}"
+        bbox = [tx * TILE_M, ty * TILE_M, (tx + 1) * TILE_M, (ty + 1) * TILE_M]
+        is_center = dx == 0 and dy == 0
+        try:
             entry = build_tile(
                 tile_id, bbox, res, out_dir, cache_dir,
-                require_buildings=(dx == 0 and dy == 0),  # alleen de kern moet raak zijn
+                require_buildings=is_center,  # alleen de kern moet raak zijn
             )
-            entry["tx"], entry["ty"] = tx, ty
-            tiles.append(entry)
+        except Exception as exc:  # noqa: BLE001 — 1 hapering mag de regio niet slopen
+            if is_center:
+                raise  # zonder centrum geen zinvolle spawn: dit is wél fataal
+            log.warning("tegel %s overgeslagen: %s", tile_id, exc)
+            failed.append(tile_id)
+            continue
+        entry["tx"], entry["ty"] = tx, ty
+        tiles.append(entry)
+
+    log.info("regio %s: %d/%d tegels gebouwd, %d overgeslagen",
+             region_id, len(tiles), len(offsets), len(failed))
+    if failed:
+        log.warning("overgeslagen tegels (volgende run vult ze via de cache aan): %s",
+                    ", ".join(failed))
 
     return {
         "id": region_id,

@@ -3,7 +3,7 @@
   "name": "Bosven — Veghel ('t Ven West)",
   "crs": "EPSG:28992",
   "locatieserver_query": "Bosven, Veghel",
-  "tiles_radius": 1,
+  "tiles_radius": 3,
   "terrain": {
     "source": "ahn_dtm",
     "resolution_m": 2.0

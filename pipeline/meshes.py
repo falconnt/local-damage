@@ -20,14 +20,18 @@ class TriangleSoup:
     """Losse driehoeken per klasse; wordt aan het eind gededupliceerd tot een mesh."""
 
     # per klasse: lijst van (3,3) float arrays (driehoek) + per-driehoek kleurfactor
+    # (tint mag een scalar zijn, of een RGB-drietal voor kleurzweem per gebouw)
     triangles: dict[str, list[np.ndarray]] = field(default_factory=dict)
-    tints: dict[str, list[float]] = field(default_factory=dict)
+    tints: dict[str, list[np.ndarray]] = field(default_factory=dict)
 
-    def add(self, cls: str, tri: np.ndarray, tint: float = 1.0) -> None:
+    def add(self, cls: str, tri: np.ndarray, tint=1.0) -> None:
         self.triangles.setdefault(cls, []).append(np.asarray(tri, dtype=np.float64))
-        self.tints.setdefault(cls, []).append(float(tint))
+        t = np.asarray(tint, dtype=np.float32)
+        if t.ndim == 0:
+            t = np.full(3, float(t), dtype=np.float32)
+        self.tints.setdefault(cls, []).append(t)
 
-    def add_polygon(self, cls: str, ring: np.ndarray, tint: float = 1.0) -> None:
+    def add_polygon(self, cls: str, ring: np.ndarray, tint=1.0) -> None:
         for tri in triangulate_polygon(ring):
             self.add(cls, tri, tint)
 

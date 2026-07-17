@@ -101,7 +101,7 @@ init().catch((err) => {
 });
 
 const loader = new GLTFLoader();
-const TILE_LOAD_M = 620;   // laden ruim achter de fog-grens: pop-in blijft onzichtbaar
+const TILE_LOAD_M = 700;   // laden ruim achter de fog-grens: pop-in blijft onzichtbaar
 const TILE_UNLOAD_M = 950; // ver weg = geheugen teruggeven
 
 async function init() {
@@ -303,7 +303,7 @@ function updateTiles() {
     .map((r) => [tileDistance(r.entry, px, pz), r])
     .sort((a, b) => a[0] - b[0]);
   for (const [d, r] of pending) {
-    if (d < TILE_LOAD_M && tilesLoading < 2) loadTile(r);
+    if (d < TILE_LOAD_M && tilesLoading < 3) loadTile(r);
   }
   for (const r of state.tiles) {
     if (r.state === 'loaded' && tileDistance(r.entry, px, pz) > TILE_UNLOAD_M) unloadTile(r);

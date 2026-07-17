@@ -29,10 +29,16 @@ SEMANTIC_MAP = {
 LOD_PREFERENCE = ("2.2", "1.3", "1.2")
 
 
-def _object_tint(obj_id: str) -> float:
-    """Stabiele, subtiele helderheid-variatie per gebouw (0.88-1.0)."""
+def _object_tint(obj_id: str) -> np.ndarray:
+    """Stabiele kleurvariatie per gebouw: helderheid + lichte warm/koel-zweem.
+
+    Sterk genoeg om bij rijtjeshuizen de naad tussen twee panden te zien,
+    subtiel genoeg om binnen het diorama-palet te blijven.
+    """
     digest = hashlib.sha1(obj_id.encode()).digest()
-    return 0.88 + 0.12 * (digest[0] / 255.0)
+    base = 0.82 + 0.20 * (digest[0] / 255.0)
+    warm = (digest[1] / 255.0 - 0.5) * 0.10
+    return np.array([base + warm, base, base - warm], dtype=np.float32)
 
 
 def _transform_vertices(vertices, transform) -> np.ndarray:

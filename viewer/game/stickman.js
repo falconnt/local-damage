@@ -334,7 +334,11 @@ export function createFightMode(engine) {
         [Math.min(...xs) + 60, Math.max(...zs) - s + 60],
         [Math.max(...xs) + s - 60, Math.max(...zs) - s + 60],
       ].sort((a, b) => Math.hypot(b[0] - p.x, b[1] - p.z) - Math.hypot(a[0] - p.x, a[1] - p.z));
-      return new THREE.Vector3(corners[0][0], 0, corners[0][1]);
+      // richting de verste hoek, maar op loopbare missie-afstand gecapt
+      const dx = corners[0][0] - p.x, dz = corners[0][1] - p.z;
+      const d = Math.hypot(dx, dz), cap = 420;
+      const f = d > cap ? cap / d : 1;
+      return new THREE.Vector3(p.x + dx * f, 0, p.z + dz * f);
     }
     return new THREE.Vector3(p.x + 250, 0, p.z - 250);
   }

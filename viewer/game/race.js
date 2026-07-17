@@ -48,7 +48,12 @@ export function createRaceMode(engine) {
         [Math.min(...xs) + 80, Math.max(...zs) - s + 80],
         [Math.max(...xs) + s - 80, Math.max(...zs) - s + 80],
       ].sort((a, b) => Math.hypot(b[0] - fromX, b[1] - fromZ) - Math.hypot(a[0] - fromX, a[1] - fromZ));
-      return corners[0];
+      // richting de verste hoek, gecapt op een lekkere race-afstand,
+      // en het baken op (of vlak bij) een weg zetten
+      const dx = corners[0][0] - fromX, dz = corners[0][1] - fromZ;
+      const d = Math.hypot(dx, dz), cap = 1300;
+      const f = d > cap ? cap / d : 1;
+      return findRoadNear(fromX + dx * f, fromZ + dz * f, 220);
     }
     return [fromX + 300, fromZ - 300];
   }

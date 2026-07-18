@@ -112,7 +112,7 @@ _ROOF_FAMILY = {
 _WALLS_BY_ROOF = {
     "warm": [("#a86048", 3), ({"low": "#b4623f", "high": "#e9e4d8"}, 2), ("#d5c49c", 1)],
     "bruin": [("#8a6a52", 2), ("#a86048", 2)],
-    "koel": [({"low": "#b4623f", "high": "#e9e4d8"}, 3), ("#d8caaa", 2), ("#ece7dc", 1), ("#a89886", 1)],
+    "koel": [({"low": "#b4623f", "high": "#e9e4d8"}, 6), ("#d8caaa", 1), ("#ece7dc", 1)],
 }
 
 
@@ -149,6 +149,89 @@ def _era_style(year, dak_type, cx: float, cy: float, roof_fam=None):
     else:
         roof = _hex(_pick_weighted(_ROOF_ERAS[era_i][1], block + "r"))
     return wall, (roof / _BASE_ROOF).astype(np.float32)
+
+
+def _point_in_poly2(pt, poly) -> bool:
+    x, y = pt
+    inside = False
+    for i in range(len(poly)):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % len(poly)]
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            inside = not inside
+    return inside
+
+
+def _facade_details(faces, centroid2d, soup, jitter) -> None:
+    """Ramen en een voordeur op de gevels ('trim'-klasse, alleen op 'hoog').
+
+    Per verticale muur: raamrijen per woonlaag op een raster, met een
+    binnen-de-gevel-check zodat er niets buiten puntgevels uitsteekt. De
+    grootste gevel op maaiveldniveau krijgt een deur.
+    """
+    walls = []
+    for cls, ring in faces:
+        if cls != "wall" or len(ring) < 3:
+            continue
+        n = np.zeros(3)
+        for i in range(len(ring)):
+            a, b = ring[i], ring[(i + 1) % len(ring)]
+            n += np.cross(a, b)
+        ln = float(np.linalg.norm(n))
+        if ln < 1e-6:
+            continue
+        n = n / ln
+        if abs(n[2]) > 0.35:
+            continue  # schuin vlak: geen gevel
+        fc = ring.mean(axis=0)
+        if n[0] * (fc[0] - centroid2d[0]) + n[1] * (fc[1] - centroid2d[1]) < 0:
+            n = -n  # naar buiten richten
+        u = np.array([-n[1], n[0], 0.0])
+        uu = ring @ u
+        zz = ring[:, 2]
+        u0, u1 = float(uu.min()), float(uu.max())
+        z0, z1 = float(zz.min()), float(zz.max())
+        if u1 - u0 < 2.4 or z1 - z0 < 2.4:
+            continue
+        walls.append((ring, n, u, np.column_stack([uu, zz]), uu[0], u0, u1, z0, z1))
+    if not walls:
+        return
+
+    door_wi = max(range(len(walls)), key=lambda i: walls[i][6] - walls[i][5])
+    glass_t = (jitter * 1.0).astype(np.float32)
+    door_t = (jitter * np.array([1.5, 1.25, 1.0])).astype(np.float32)
+
+    for wi, (ring, n, u, poly_uz, u_ref, u0, u1, z0, z1) in enumerate(walls):
+        base_pt = ring[0]
+
+        def quad(c_lo_u, c_hi_u, c_lo_z, c_hi_z, tint):
+            pts = []
+            for uv, z in ((c_lo_u, c_lo_z), (c_hi_u, c_lo_z), (c_hi_u, c_hi_z), (c_lo_u, c_hi_z)):
+                p = base_pt + (uv - u_ref) * u
+                pts.append((p[0] + n[0] * 0.05, p[1] + n[1] * 0.05, z))
+            soup.add_polygon("trim", np.array(pts), tint)
+
+        width = u1 - u0
+        ncols = int((width - 1.0) // 1.9)
+        if ncols <= 0:
+            continue
+        start = u0 + (width - ncols * 1.9) / 2 + 0.95
+        storeys = min(3, max(1, int((z1 - z0 - 1.2) // 2.9) + 1))
+        for k in range(storeys):
+            lo = z0 + 0.95 + k * 2.9
+            hi = lo + 1.15
+            if hi > z1 - 0.3:
+                break
+            for ci in range(ncols):
+                cu = start + ci * 1.9
+                if wi == door_wi and k == 0 and ci == ncols // 2:
+                    corners = [(cu - 0.5, z0 + 0.02), (cu + 0.5, z0 + 0.02), (cu + 0.5, z0 + 2.15), (cu - 0.5, z0 + 2.15)]
+                    if all(_point_in_poly2(c, poly_uz) for c in corners):
+                        quad(cu - 0.5, cu + 0.5, z0 + 0.02, z0 + 2.15, door_t)
+                    continue
+                corners = [(cu - 0.575, lo), (cu + 0.575, lo), (cu + 0.575, hi), (cu - 0.575, hi)]
+                if all(_point_in_poly2(c, poly_uz) for c in corners):
+                    quad(cu - 0.575, cu + 0.575, lo, hi, glass_t)
 
 
 def _clip_tri_z(tri: np.ndarray, z: float):
@@ -345,6 +428,8 @@ def parse_city_objects(
             cls_tint["wall"] = wall_split[1]  # fallback voor niet-muurvlakken
         else:
             cls_tint["wall"] = np.clip(wall_style * tint, 0, 1.6).astype(np.float32)
+
+        _facade_details(faces, (cx, cy), soup, tint)
 
         for cls, ring in faces:
             if cls == "wall" and wall_split is not None:

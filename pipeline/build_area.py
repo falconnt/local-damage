@@ -270,7 +270,7 @@ def assemble_meshes(
                 meshes.append(mesh)
                 log.info("ondergrond %s: %d cellen", cls, int(mask.sum()))
 
-    for cls in ("roof", "wall", "ground", "road", "water", "sand", "tree", "trunk"):
+    for cls in ("roof", "wall", "trim", "ground", "road", "water", "sand", "tree", "trunk"):
         mesh = soup_to_flat_mesh(soup, cls)
         if mesh is not None:
             meshes.append(mesh)

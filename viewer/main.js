@@ -20,6 +20,7 @@ const state = {
   fogScale: 1,
   labels: 'all',      // 'all' | 'signs' | 'none' — per kwaliteitsniveau
   showTrees: true,
+  showDetail: true,   // ramen/deuren op gevels
   yaw: 0,
   pitch: -0.05,
   velocity: new THREE.Vector3(),
@@ -48,9 +49,9 @@ const SURFACE_CLASSES = new Set(['grass', 'road', 'water', 'sand', 'green', 'gro
 // framerate: schokt het, dan schakelt hij vanzelf een stap terug (en onthoudt dat).
 const QUALITY = {
   //         resolutie  schaduw          zicht  tegels        anti-  bordjes  bomen
-  low:  { label: 'laag',   pr: 0.67, shadows: false, shadowRes: 1024, fogScale: 0.5,  far: 700,  load: 300, unload: 520, aa: false, labels: 'none',  trees: false },
-  mid:  { label: 'middel', pr: 1.25, shadows: false, shadowRes: 1024, fogScale: 0.8,  far: 1300, load: 560, unload: 820, aa: true,  labels: 'signs', trees: true },
-  high: { label: 'hoog',   pr: 2.0,  shadows: true,  shadowRes: 2048, fogScale: 1.0,  far: 3000, load: 700, unload: 950, aa: true,  labels: 'all',   trees: true },
+  low:  { label: 'laag',   pr: 0.67, shadows: false, shadowRes: 1024, fogScale: 0.5,  far: 700,  load: 300, unload: 520, aa: false, labels: 'none',  trees: false, detail: false },
+  mid:  { label: 'middel', pr: 1.25, shadows: false, shadowRes: 1024, fogScale: 0.8,  far: 1300, load: 560, unload: 820, aa: true,  labels: 'signs', trees: true,  detail: true },
+  high: { label: 'hoog',   pr: 2.0,  shadows: true,  shadowRes: 2048, fogScale: 1.0,  far: 3000, load: 700, unload: 950, aa: true,  labels: 'all',   trees: true,  detail: true },
 };
 const Q_ORDER = ['low', 'mid', 'high'];
 let TILE_LOAD_M = 700;   // laden ruim achter de fog-grens: pop-in blijft onzichtbaar
@@ -124,6 +125,7 @@ function applyQuality(level) {
   state.fogScale = q.fogScale;
   state.labels = q.labels;
   state.showTrees = q.trees;
+  state.showDetail = q.detail;
   applyLabelDetail();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pr));
   const shadowChanged = renderer.shadowMap.enabled !== q.shadows;
@@ -534,6 +536,9 @@ function applyLabelDetail() {
   for (const meshes of [state.classMeshes.get('tree'), state.classMeshes.get('trunk')]) {
     if (meshes) for (const m of meshes) m.visible = state.showTrees;
   }
+  // ramen/deuren ('trim'): alleen op middel/hoog
+  const trims = state.classMeshes.get('trim');
+  if (trims) for (const m of trims) m.visible = state.showDetail;
 }
 
 // --- stijl / paletten -------------------------------------------------------

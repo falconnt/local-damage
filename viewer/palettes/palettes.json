@@ -31,7 +31,8 @@
       "sand": "#d9c69a",
       "green": "#79a558",
       "tree": "#6a9c4f",
-      "trunk": "#6e5138"
+      "trunk": "#6e5138",
+      "trim": "#39414e"
     }
   },
   "sunset": {
@@ -66,7 +67,8 @@
       "sand": "#d8ba8e",
       "green": "#6c8a4e",
       "tree": "#5d7f45",
-      "trunk": "#63482f"
+      "trunk": "#63482f",
+      "trim": "#41394e"
     }
   },
   "fog": {
@@ -101,7 +103,8 @@
       "sand": "#c9c2ae",
       "green": "#7a9670",
       "tree": "#6f8d68",
-      "trunk": "#6a5a48"
+      "trunk": "#6a5a48",
+      "trim": "#39414e"
     }
   }
 }

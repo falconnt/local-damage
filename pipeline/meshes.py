@@ -29,9 +29,15 @@ class TriangleSoup:
         t = np.asarray(tint, dtype=np.float32)
         if t.ndim == 0:
             t = np.full(3, float(t), dtype=np.float32)
+        # t is (3,) = 1 kleur per driehoek, of (3,3) = kleur per hoekpunt
         self.tints.setdefault(cls, []).append(t)
 
     def add_polygon(self, cls: str, ring: np.ndarray, tint=1.0) -> None:
+        if callable(tint):
+            # per-hoekpunt kleur (bv. baksteen onder / stucwerk boven)
+            for tri in triangulate_polygon(ring):
+                self.add(cls, tri, np.array([tint(v) for v in tri], dtype=np.float32))
+            return
         for tri in triangulate_polygon(ring):
             self.add(cls, tri, tint)
 

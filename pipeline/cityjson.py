@@ -12,7 +12,7 @@ import logging
 
 import numpy as np
 
-from .meshes import TriangleSoup
+from .meshes import TriangleSoup, triangulate_polygon
 
 log = logging.getLogger(__name__)
 
@@ -63,14 +63,16 @@ _WALL_ERAS = [
     (1945, [("#8a4a3a", 3)]),                                    # vooroorlogs donkerrood
     (1970, [("#9a604a", 3), ("#8a5a46", 1)]),                    # wederopbouw roodbruin
     (1990, [("#8a6a52", 3), ("#96705a", 1)]),                    # jaren 70/80 bruin
-    (2005, [("#a86048", 3), ("#d5c49c", 2), ("#b87a5c", 1)]),    # vinex: roodbruin / zandgeel
-    (9999, [("#d8caaa", 3), ("#8f4a3c", 2), ("#ece7dc", 1), ("#a89886", 1)]),  # 2005+
+    # vinex ('t Ven-stijl, zie Bosven 307): baksteen onder + wit stucwerk boven,
+    # daarnaast effen roodbruine en zandgele rijen
+    (2005, [({"low": "#b4623f", "high": "#e9e4d8"}, 3), ("#a86048", 2), ("#d5c49c", 2)]),
+    (9999, [("#d8caaa", 2), ({"low": "#a8543e", "high": "#ece7dc"}, 2), ("#8f4a3c", 1), ("#a89886", 1)]),  # 2005+
 ]
 _ROOF_ERAS = [
     (1945, [("#b05a38", 1)]),                                    # oud-Hollands oranjerood
     (1970, [("#a85a40", 2), ("#6a5148", 1)]),
     (1990, [("#5e453a", 2), ("#4a4640", 1)]),                    # donkerbruin/antraciet
-    (2005, [("#aa5c3e", 3), ("#46474f", 2)]),                    # vinex: oranjerood / antraciet
+    (2005, [("#46474f", 3), ("#aa5c3e", 2)]),                    # vinex: antraciet / oranjerood
     (9999, [("#3f4046", 3), ("#9a4f34", 1)]),
 ]
 
@@ -86,16 +88,46 @@ def _pick_weighted(options, seed: str):
 
 
 def _era_style(year, dak_type, cx: float, cy: float):
-    """(muur-, dak-)kleurfactor voor dit pand: periode + projectblok bepalen."""
+    """(muur-, dak-)stijl voor dit pand: periode + projectblok bepalen.
+
+    Muurstijl is een kleurfactor, of een dict {low, high} voor het
+    twee-lagen-beeld (baksteen onder, stucwerk boven).
+    """
     y = int(year) if year else 1995  # onbekend: aanname nieuwbouwwijk
     era_i = next(i for i, (until, _) in enumerate(_WALL_ERAS) if y < until)
     block = f"{int(cx // 60)}_{int(cy // 60)}_{era_i}"
-    wall = _hex(_pick_weighted(_WALL_ERAS[era_i][1], block + "w"))
+    picked = _pick_weighted(_WALL_ERAS[era_i][1], block + "w")
+    if isinstance(picked, dict):
+        wall = {k: (_hex(v) / _BASE_WALL).astype(np.float32) for k, v in picked.items()}
+    else:
+        wall = (_hex(picked) / _BASE_WALL).astype(np.float32)
     if dak_type in ("horizontal", "multiple horizontal"):
         roof = _hex(_FLAT_ROOF)
     else:
         roof = _hex(_pick_weighted(_ROOF_ERAS[era_i][1], block + "r"))
-    return (wall / _BASE_WALL).astype(np.float32), (roof / _BASE_ROOF).astype(np.float32)
+    return wall, (roof / _BASE_ROOF).astype(np.float32)
+
+
+def _clip_tri_z(tri: np.ndarray, z: float):
+    """Splits een driehoek op het vlak z: levert (subdriehoek, onder?) paren.
+
+    Winding blijft behouden zodat de flat-shading-normalen kloppen.
+    """
+    d = tri[:, 2] - z
+    below = d < 0
+    n_below = int(below.sum())
+    if n_below in (0, 3):
+        yield tri, n_below == 3
+        return
+    lone_below = n_below == 1
+    lone_i = int(np.where(below == lone_below)[0][0])
+    v = np.roll(tri, -lone_i, axis=0)
+    dd = np.roll(d, -lone_i)
+    i01 = v[0] + (v[1] - v[0]) * (dd[0] / (dd[0] - dd[1]))
+    i02 = v[0] + (v[2] - v[0]) * (dd[0] / (dd[0] - dd[2]))
+    yield np.array([v[0], i01, i02]), lone_below
+    yield np.array([v[1], v[2], i02]), not lone_below
+    yield np.array([v[1], i02, i01]), not lone_below
 
 
 def _transform_vertices(vertices, transform) -> np.ndarray:
@@ -228,7 +260,6 @@ def parse_city_objects(
             cx + origin[0], cy + origin[1],
         )
         cls_tint = {
-            "wall": np.clip(wall_style * tint, 0, 1.6).astype(np.float32),
             "roof": np.clip(roof_style * tint, 0, 1.6).astype(np.float32),
             "ground": tint,  # losse vloer/terrasvlakken: neutraal, valt weg in het terrein
         }
@@ -244,7 +275,27 @@ def parse_city_objects(
                 for _, ring in faces:
                     ring[:, 2] -= drop
 
+        # muurkleur: effen, of per hoogte gesplitst (baksteen onder, stuc boven)
+        wall_split = None
+        if isinstance(wall_style, dict):
+            foot_z = min(float(ring[:, 2].min()) for _, ring in faces)
+            wall_split = (
+                foot_z + 3.05,  # één woonlaag metselwerk, daarboven stucwerk
+                np.clip(wall_style["low"] * tint, 0, 1.6).astype(np.float32),
+                np.clip(wall_style["high"] * tint, 0, 1.6).astype(np.float32),
+            )
+            cls_tint["wall"] = wall_split[1]  # fallback voor niet-muurvlakken
+        else:
+            cls_tint["wall"] = np.clip(wall_style * tint, 0, 1.6).astype(np.float32)
+
         for cls, ring in faces:
+            if cls == "wall" and wall_split is not None:
+                split_z, low, high = wall_split
+                for tri in triangulate_polygon(ring):
+                    for sub, is_below in _clip_tri_z(tri, split_z):
+                        soup.add("wall", sub, low if is_below else high)
+                        faces_added += 1
+                continue
             soup.add_polygon(cls, ring, cls_tint.get(cls, cls_tint["wall"]))
             faces_added += 1
     return faces_added

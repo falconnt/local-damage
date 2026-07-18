@@ -620,6 +620,7 @@ function setupControls() {
     card.addEventListener('click', (e) => {
       e.stopPropagation();
       if (card.dataset.mode === 'race') showCarSelect();
+      else if (card.dataset.mode === 'free') showStartSelect();
       else startMode(card.dataset.mode);
     });
   }
@@ -850,11 +851,97 @@ function showMenu() {
   showActions(null);
   document.getElementById('menu-btn').style.display = 'none';
   document.getElementById('car-select').classList.add('hidden');
+  document.getElementById('start-select').classList.add('hidden');
   document.getElementById('settings').classList.add('hidden');
   document.getElementById('settings-btn').style.display = '';
   document.getElementById('modes').classList.remove('hidden');
   document.getElementById('overlay').classList.remove('hidden');
   document.exitPointerLock?.();
+}
+
+// startlocatie-kiezer voor free roam: buurten (CBS) + straten (BAG)
+async function collectStreets() {
+  if (state.streetIndex) return state.streetIndex;
+  const { region, base, origin } = state.world ?? {};
+  if (!region) return (state.streetIndex = []);
+  const map = new Map();
+  await Promise.all(region.tiles.filter((t) => t.addresses).map(async (t) => {
+    try {
+      const data = await (await fetch(base + t.addresses)).json();
+      const ox = t.origin_rd[0] - origin[0];
+      const oz = -(t.origin_rd[1] - origin[1]);
+      for (const it of data.items ?? []) {
+        if (!it.street) continue;
+        const e = map.get(it.street) ?? { n: 0, x: 0, z: 0 };
+        e.n += 1; e.x += it.pos[0] + ox; e.z += it.pos[2] + oz;
+        map.set(it.street, e);
+      }
+    } catch { /* tegel zonder bordjes */ }
+  }));
+  state.streetIndex = [...map.entries()]
+    .map(([name, e]) => ({ name, x: e.x / e.n, z: e.z / e.n }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'nl'));
+  return state.streetIndex;
+}
+
+async function startFreeAt(x, z) {
+  await startMode('free');
+  engine.setFly?.(false); // te voet op straat, niet vliegend
+  camera.position.set(x, (groundHeight(x, z) ?? 40) + EYE_HEIGHT, z);
+  state.yaw = Math.PI * 0.25;
+  state.roadSnap = { x, z, tries: 0 }; // zodra de tegel er is: naar de weg
+}
+
+async function showStartSelect() {
+  ensureAudio(); sfx.click();
+  const region = state.world?.region;
+  if (!region) { startMode('free'); return; }
+  const wrap = document.getElementById('start-options');
+  if (!wrap.childElementCount) {
+    const addBtn = (label, cb) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', (e) => { e.stopPropagation(); cb(); });
+      wrap.appendChild(b);
+    };
+    addBtn('🪂 vrij vliegen (standaard)', () => startMode('free'));
+    const [wox, woy] = engine.worldOrigin();
+    for (const b of region.buurten ?? []) {
+      const x = b.rd[0] - wox;
+      const z = -(b.rd[1] - woy);
+      addBtn(`📍 ${b.naam}`, () => startFreeAt(x, z));
+    }
+    // stratenlijst vullen (async) voor het zoekveld
+    collectStreets().then((streets) => {
+      const dl = document.getElementById('street-list');
+      for (const st of streets) {
+        const opt = document.createElement('option');
+        opt.value = st.name;
+        dl.appendChild(opt);
+      }
+    });
+    const go = () => {
+      const name = document.getElementById('street-input').value.trim().toLowerCase();
+      const st = (state.streetIndex ?? []).find((s2) => s2.name.toLowerCase() === name)
+        ?? (state.streetIndex ?? []).find((s2) => s2.name.toLowerCase().startsWith(name) && name.length >= 3);
+      if (st) { sfx.click(); startFreeAt(st.x, st.z); }
+    };
+    document.getElementById('street-go').addEventListener('click', (e) => { e.stopPropagation(); go(); });
+    document.getElementById('street-input').addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') go();
+    });
+    document.getElementById('start-back').addEventListener('click', (e) => {
+      e.stopPropagation(); sfx.click();
+      document.getElementById('start-select').classList.add('hidden');
+      document.getElementById('modes').classList.remove('hidden');
+      document.getElementById('settings-btn').style.display = '';
+    });
+  }
+  document.getElementById('modes').classList.add('hidden');
+  document.getElementById('settings-btn').style.display = 'none';
+  document.getElementById('start-select').classList.remove('hidden');
 }
 
 // autokeuze vóór de race: kaartjes met silhouet + eigenschappen
@@ -938,6 +1025,25 @@ function tick() {
           localStorage.setItem('ld-quality-auto', Q_ORDER[i - 1]); // volgende start meteen goed (incl. AA)
         }
       }
+    }
+  }
+
+  // startlocatie gekozen: zodra het terrein er is, naar de dichtstbijzijnde weg
+  if (state.roadSnap && state.started) {
+    const rs = state.roadSnap;
+    if (groundHeight(rs.x, rs.z) !== null) {
+      let best = null;
+      for (let r = 0; r <= 140 && !best; r += 8) {
+        for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+          const sx = rs.x + Math.cos(a) * r, sz = rs.z + Math.sin(a) * r;
+          if (surfaceAt(sx, sz)?.cls === 'road') { best = [sx, sz]; break; }
+        }
+      }
+      const [bx, bz] = best ?? [rs.x, rs.z];
+      camera.position.set(bx, (groundHeight(bx, bz) ?? 0) + EYE_HEIGHT, bz);
+      state.roadSnap = null;
+    } else if ((rs.tries += 1) > 900) {
+      state.roadSnap = null; // tegel komt niet: laat staan waar hij is
     }
   }
 

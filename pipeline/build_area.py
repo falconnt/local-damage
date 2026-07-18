@@ -256,13 +256,22 @@ def build_region(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
         log.warning("overgeslagen tegels (volgende run vult ze via de cache aan): %s",
                     ", ".join(failed))
 
+    # buurtenlijst (CBS) voor de startlocatie-kiezer; tolerant bij falen
+    from . import fetch_buurten
+    region_bbox = [
+        (tx0 - radius) * TILE_M, (ty0 - radius) * TILE_M,
+        (tx0 + radius + 1) * TILE_M, (ty0 + radius + 1) * TILE_M,
+    ]
+    buurten = fetch_buurten.fetch_buurten(region_bbox, cache_dir / f"_region_{region_id}")
+
     return {
         "id": region_id,
         "name": config.get("name", region_id),
         "tile_size_m": TILE_M,
         "spawn_rd": [x, y],
         "tiles": tiles,
-        "attribution": "3DBAG (CC BY 4.0, tudelft3d & 3DGI) · AHN/BGT/BAG via PDOK",
+        "buurten": buurten,
+        "attribution": "3DBAG (CC BY 4.0, tudelft3d & 3DGI) · AHN/BGT/BAG · CBS via PDOK",
     }
 
 

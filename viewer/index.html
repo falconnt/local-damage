@@ -85,7 +85,16 @@
       color: #fff; padding: 0.55rem 0.9rem; border-radius: 999px; font-size: 0.8rem; cursor: pointer; min-height: 2.4rem; }
     #palettes button.active, #quality button.active { background: rgba(255,255,255,0.85); color: #1a1d2a; }
     .q-note { width: 100%; text-align: center; font-size: 0.68rem; opacity: 0.6; margin: 0; }
-    #settings-btn, #settings-back { background: none; border: none; color: inherit; opacity: 0.7; font: inherit; cursor: pointer; }
+    #settings-btn, #settings-back, #start-back { background: none; border: none; color: inherit; opacity: 0.7; font: inherit; cursor: pointer; }
+    #start-select { display: flex; flex-direction: column; align-items: center; gap: 0.8rem; margin-top: 0.4rem; }
+    #start-options { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; max-width: 46rem; }
+    #start-options button { border: 1px solid rgba(255,255,255,0.3); background: rgba(28,32,54,0.72);
+      color: #fff; padding: 0.5rem 0.85rem; border-radius: 999px; font-size: 0.85rem; cursor: pointer; }
+    #street-pick { display: flex; gap: 0.4rem; }
+    #street-pick input { border-radius: 999px; border: 1px solid rgba(255,255,255,0.35);
+      background: rgba(20,22,38,0.6); color: #fff; padding: 0.5rem 1rem; font: inherit; width: 15rem; }
+    #street-pick button { border: 1px solid rgba(255,255,255,0.4); background: rgba(255,178,125,0.85);
+      color: #1a1d2a; font-weight: 700; padding: 0.5rem 1.1rem; border-radius: 999px; cursor: pointer; }
 
     #footer { position: fixed; bottom: calc(0.45rem + env(safe-area-inset-bottom)); left: 0; right: 0; z-index: 5;
       text-align: center; color: rgba(255,255,255,0.55); font-size: 0.65rem; pointer-events: none; padding: 0 1rem; }
@@ -152,6 +161,16 @@
       <p style="margin:0;letter-spacing:0.2em;opacity:0.8">KIES JE AUTO</p>
       <div id="car-cards"></div>
       <button id="car-back" type="button">← terug</button>
+    </div>
+    <div id="start-select" class="hidden">
+      <p style="margin:0;letter-spacing:0.2em;opacity:0.8">WAAR WIL JE STARTEN?</p>
+      <div id="start-options"></div>
+      <div id="street-pick">
+        <input id="street-input" list="street-list" placeholder="of typ een straatnaam…" autocomplete="off" />
+        <datalist id="street-list"></datalist>
+        <button id="street-go" type="button">start</button>
+      </div>
+      <button id="start-back" type="button">← terug</button>
     </div>
     <div id="settings" class="hidden">
       <p style="margin:0;letter-spacing:0.2em;opacity:0.8">INSTELLINGEN</p>

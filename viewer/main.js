@@ -396,18 +396,19 @@ async function findManifest() {
 const SIGN_BLUE = '#00519e';
 const labelState = { numbers: [], signs: [], streets: [], textures: new Map() };
 
-function labelTexture(text, { width, height, fontPx, border }) {
-  const key = `${text}|${width}`;
+function labelTexture(text, { width, height, fontPx, border, white = false }) {
+  const key = `${text}|${width}|${white ? 'w' : 'b'}`;
   if (labelState.textures.has(key)) return labelState.textures.get(key);
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = SIGN_BLUE;
+  // huisnummers: wit bordje met zwarte letters; straatnamen: NL-blauw met wit
+  ctx.fillStyle = white ? '#f4f2ec' : SIGN_BLUE;
   ctx.fillRect(0, 0, width, height);
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = border;
+  ctx.strokeStyle = white ? '#26282c' : '#ffffff';
+  ctx.lineWidth = white ? border * 0.6 : border;
   ctx.strokeRect(border * 1.4, border * 1.4, width - border * 2.8, height - border * 2.8);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = white ? '#1a1c20' : '#ffffff';
   ctx.font = `bold ${fontPx}px system-ui, Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -423,7 +424,7 @@ function makePlaque(text, pos, n, { big }) {
   const chars = Math.max(2, text.length);
   const tex = big
     ? labelTexture(text.toUpperCase(), { width: 64 * chars + 96, height: 160, fontPx: 92, border: 10 })
-    : labelTexture(text, { width: 44 * chars + 52, height: 110, fontPx: 62, border: 8 });
+    : labelTexture(text, { width: 44 * chars + 52, height: 110, fontPx: 62, border: 8, white: true });
   const w = big ? 0.11 * chars + 0.28 : 0.05 * chars + 0.12;
   const h = big ? 0.32 : 0.2;
   const mesh = new THREE.Mesh(
@@ -438,19 +439,28 @@ function makePlaque(text, pos, n, { big }) {
 function streetNameTexture(text) {
   const key = `street|${text}`;
   if (labelState.textures.has(key)) return labelState.textures.get(key);
-  const fontPx = 96;
+  const label = text.toUpperCase();
+  const fontPx = 84;
   const canvas = document.createElement('canvas');
-  canvas.width = fontPx * 0.62 * text.length + 80;
-  canvas.height = 150;
+  canvas.width = Math.round(fontPx * 0.62 * label.length + 130);
+  canvas.height = 168;
   const ctx = canvas.getContext('2d');
-  ctx.font = `600 ${fontPx}px system-ui, Arial, sans-serif`;
+  // zwevend NL-straatnaambord: blauw vlak, witte rand, witte kapitalen
+  const r = 26;
+  ctx.beginPath();
+  ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, r);
+  ctx.fillStyle = SIGN_BLUE;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(16, 16, canvas.width - 32, canvas.height - 32, r - 8);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 8;
+  ctx.stroke();
+  ctx.font = `bold ${fontPx}px system-ui, Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = 12;
-  ctx.strokeStyle = 'rgba(20, 24, 44, 0.9)';
-  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillText(label, canvas.width / 2, canvas.height / 2 + fontPx * 0.05);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -511,9 +521,14 @@ function updateLabelVisibility() {
   if (state.labels === 'all') {
     for (const s of labelState.streets) {
       const d = s.position.distanceTo(p);
-      const h = THREE.MathUtils.clamp(d * 0.055, 3.5, 26);
+      const h = THREE.MathUtils.clamp(d * 0.055, 3.5, 20);
       s.scale.set(h * s.userData.aspect, h, 1);
-      s.material.opacity = d < 46 ? 0 : 0.92; // vlak eronder: niet in je gezicht
+      // vlak eronder niet in je gezicht; ver weg uitfaden zodat de horizon
+      // geen wolk van straatnamen wordt
+      let o = 0;
+      if (d >= 46 && d < 420) o = 0.72 * Math.min(1, (420 - d) / 90);
+      s.material.opacity = o;
+      s.visible = o > 0.02;
     }
   }
   if (++labelTick % 30 !== 0) return;

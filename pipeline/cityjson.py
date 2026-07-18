@@ -36,9 +36,66 @@ def _object_tint(obj_id: str) -> np.ndarray:
     subtiel genoeg om binnen het diorama-palet te blijven.
     """
     digest = hashlib.sha1(obj_id.encode()).digest()
-    base = 0.82 + 0.20 * (digest[0] / 255.0)
-    warm = (digest[1] / 255.0 - 0.5) * 0.10
+    base = 0.86 + 0.16 * (digest[0] / 255.0)
+    warm = (digest[1] / 255.0 - 0.5) * 0.08
     return np.array([base + warm, base, base - warm], dtype=np.float32)
+
+
+# --- wijkstijl per bouwperiode ----------------------------------------------
+# Nederlandse woonwijken hebben per bouwperiode een herkenbaar materiaalbeeld
+# (baksteen- en dakpankleur). Het bouwjaar komt uit 3D BAG
+# (`oorspronkelijkbouwjaar`), het daktype uit `b3_dak_type`. De kleuren worden
+# gebakken als verhouding t.o.v. de paletbasis (viewer: klasse-kleur x
+# vertex-kleur), zodat de sfeerpaletten (middag/zonsondergang/mist) blijven
+# werken. Varianten worden per "bouwproject" gekozen (ruimtelijk blok van 60 m
+# + periode): hele rijen delen dan dezelfde steen, zoals in het echt.
+_BASE_WALL = np.array([0xE8, 0xE0, 0xCD], dtype=np.float64) / 255.0
+_BASE_ROOF = np.array([0xC2, 0x6B, 0x4E], dtype=np.float64) / 255.0
+_FLAT_ROOF = "#55565c"  # bitumen/grind: altijd donkergrijs, ongeacht periode
+
+
+def _hex(c: str) -> np.ndarray:
+    return np.array([int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)], dtype=np.float64) / 255.0
+
+
+# (tot-jaar, [(kleur, gewicht), ...]) — doelkleuren bij het middag-palet
+_WALL_ERAS = [
+    (1945, [("#8a4a3a", 3)]),                                    # vooroorlogs donkerrood
+    (1970, [("#9a604a", 3), ("#8a5a46", 1)]),                    # wederopbouw roodbruin
+    (1990, [("#8a6a52", 3), ("#96705a", 1)]),                    # jaren 70/80 bruin
+    (2005, [("#a86048", 3), ("#d5c49c", 2), ("#b87a5c", 1)]),    # vinex: roodbruin / zandgeel
+    (9999, [("#d8caaa", 3), ("#8f4a3c", 2), ("#ece7dc", 1), ("#a89886", 1)]),  # 2005+
+]
+_ROOF_ERAS = [
+    (1945, [("#b05a38", 1)]),                                    # oud-Hollands oranjerood
+    (1970, [("#a85a40", 2), ("#6a5148", 1)]),
+    (1990, [("#5e453a", 2), ("#4a4640", 1)]),                    # donkerbruin/antraciet
+    (2005, [("#aa5c3e", 3), ("#46474f", 2)]),                    # vinex: oranjerood / antraciet
+    (9999, [("#3f4046", 3), ("#9a4f34", 1)]),
+]
+
+
+def _pick_weighted(options, seed: str):
+    total = sum(w for _, w in options)
+    r = int.from_bytes(hashlib.sha1(seed.encode()).digest()[:2], "big") % total
+    for color, w in options:
+        r -= w
+        if r < 0:
+            return color
+    return options[0][0]
+
+
+def _era_style(year, dak_type, cx: float, cy: float):
+    """(muur-, dak-)kleurfactor voor dit pand: periode + projectblok bepalen."""
+    y = int(year) if year else 1995  # onbekend: aanname nieuwbouwwijk
+    era_i = next(i for i, (until, _) in enumerate(_WALL_ERAS) if y < until)
+    block = f"{int(cx // 60)}_{int(cy // 60)}_{era_i}"
+    wall = _hex(_pick_weighted(_WALL_ERAS[era_i][1], block + "w"))
+    if dak_type in ("horizontal", "multiple horizontal"):
+        roof = _hex(_FLAT_ROOF)
+    else:
+        roof = _hex(_pick_weighted(_ROOF_ERAS[era_i][1], block + "r"))
+    return (wall / _BASE_WALL).astype(np.float32), (roof / _BASE_ROOF).astype(np.float32)
 
 
 def _transform_vertices(vertices, transform) -> np.ndarray:
@@ -126,6 +183,15 @@ def parse_city_objects(
         geom = _pick_geometry(geometries)
         if not geom:
             continue
+        # attributen (bouwjaar, daktype) staan op het Building-object; de
+        # geometrie meestal op de BuildingPart — kijk dan bij de ouder
+        attrs = obj.get("attributes") or {}
+        if not attrs.get("oorspronkelijkbouwjaar"):
+            for parent_id in obj.get("parents") or []:
+                pattrs = (city_objects.get(parent_id) or {}).get("attributes") or {}
+                if pattrs.get("oorspronkelijkbouwjaar"):
+                    attrs = pattrs
+                    break
         tint = _object_tint(obj_id)
         sem_surfaces = (geom.get("semantics") or {}).get("surfaces") or surface_types or []
 
@@ -147,13 +213,25 @@ def parse_city_objects(
         if not faces:
             continue
 
+        pts2d = np.concatenate([ring for _, ring in faces])[:, :2]
+        cx, cy = pts2d.mean(axis=0)
         if clip_bounds is not None:
             # de API levert per tegel (ruimer dan gevraagd): clip op centroid
-            pts2d = np.concatenate([ring for _, ring in faces])[:, :2]
-            cx, cy = pts2d.mean(axis=0)
             minx, miny, maxx, maxy = clip_bounds
             if not (minx - 2 <= cx <= maxx + 2 and miny - 2 <= cy <= maxy + 2):
                 continue
+
+        # wijkstijl: bouwperiode + projectblok -> muur- en dakkleur (globale
+        # RD-coordinaten zodat het blok niet op een tegelrand omklapt)
+        wall_style, roof_style = _era_style(
+            attrs.get("oorspronkelijkbouwjaar"), attrs.get("b3_dak_type"),
+            cx + origin[0], cy + origin[1],
+        )
+        cls_tint = {
+            "wall": np.clip(wall_style * tint, 0, 1.6).astype(np.float32),
+            "roof": np.clip(roof_style * tint, 0, 1.6).astype(np.float32),
+            "ground": tint,  # losse vloer/terrasvlakken: neutraal, valt weg in het terrein
+        }
 
         if ground_sampler is not None:
             pts = np.concatenate([ring for _, ring in faces])
@@ -167,7 +245,7 @@ def parse_city_objects(
                     ring[:, 2] -= drop
 
         for cls, ring in faces:
-            soup.add_polygon(cls, ring, tint)
+            soup.add_polygon(cls, ring, cls_tint.get(cls, cls_tint["wall"]))
             faces_added += 1
     return faces_added
 

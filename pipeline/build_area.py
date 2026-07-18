@@ -77,7 +77,7 @@ def build_tile(
     require_buildings: bool = True,
 ) -> dict:
     """Bouw één tegel (GLB + bordjes-JSON) voor de gegeven RD-bbox."""
-    from . import fetch_3dbag, fetch_ahn, fetch_bag, fetch_bgt, labels  # lazy: online route
+    from . import fetch_3dbag, fetch_ahn, fetch_bag, fetch_bgt, fetch_luchtfoto, labels  # lazy: online route
 
     area_id = tile_id
     origin = np.array([bbox[0], bbox[1]], dtype=np.float64)
@@ -99,12 +99,21 @@ def build_tile(
     def ground(x: float, y: float) -> float:
         return terrain.sample_height(heights, res, x, y)
 
-    # 2) gebouwen (3D BAG LoD2.2), gesnapt op het terrein tegen zwevende huizen
+    # 2) gebouwen (3D BAG LoD2.2), gesnapt op het terrein tegen zwevende huizen.
+    # De PDOK-luchtfoto levert de echte dakkleur per pand (optioneel).
     metadata, features = fetch_3dbag.fetch_buildings(bbox, cache_dir / area_id)
     log.info("3dbag: %d features", len(features))
+    roof_sampler = None
+    foto = fetch_luchtfoto.fetch_rgb(bbox, cache_dir / area_id)
+    if foto is not None:
+        try:
+            roof_sampler = fetch_luchtfoto.make_roof_sampler(foto, bbox)
+        except Exception as exc:  # pillow ontbreekt / corrupt beeld: stijl-fallback
+            log.warning("luchtfoto niet bruikbaar (%s) — bouwperiode-palet als dakkleur", exc)
     soup = cityjson.features_to_soup(
         metadata, features, origin,
         ground_sampler=ground, clip_bounds=(0.0, 0.0, size_x, size_y),
+        roof_sampler=roof_sampler,
     )
     n_tris = sum(len(v) for v in soup.triangles.values())
     if n_tris == 0:

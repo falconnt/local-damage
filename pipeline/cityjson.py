@@ -77,6 +77,32 @@ _ROOF_ERAS = [
 ]
 
 
+# gemeten dakkleur (luchtfoto) -> dichtstbijzijnde gestileerde dakkleur,
+# zodat de diorama-look behouden blijft maar de wijk zijn echte kleuren krijgt
+_ROOF_SNAP = ["#b5643f", "#9a4f34", "#8a5a40", "#5e453a", "#46474f", "#6a6b70", "#2f3034", "#8a8b8e"]
+
+
+def _measure_roof(faces, roof_sampler):
+    """Mediaan-dakkleur uit de luchtfoto, gesnapt op het dakpalet. None = geen meting."""
+    samples = []
+    for cls, ring in faces:
+        if cls != "roof":
+            continue
+        c = ring[:, :2].mean(axis=0)
+        rgb = roof_sampler(float(c[0]), float(c[1]))
+        if rgb is not None:
+            samples.append(np.asarray(rgb, dtype=np.float64))
+    if not samples:
+        return None
+    arr = np.stack(samples)
+    if len(arr) >= 3:  # schaduwkant van het dak weglaten
+        lum = arr.mean(axis=1)
+        arr = arr[lum >= np.quantile(lum, 0.4)]
+    med = np.median(arr, axis=0)
+    best = min(_ROOF_SNAP, key=lambda h: float(((_hex(h) - med) ** 2).sum()))
+    return _hex(best)
+
+
 def _pick_weighted(options, seed: str):
     total = sum(w for _, w in options)
     r = int.from_bytes(hashlib.sha1(seed.encode()).digest()[:2], "big") % total
@@ -199,6 +225,7 @@ def parse_city_objects(
     surface_types: list[dict] | None = None,
     ground_sampler=None,
     clip_bounds: tuple[float, float, float, float] | None = None,
+    roof_sampler=None,
 ) -> int:
     """Voeg alle Building(Part)-geometrie toe aan de soup. Returnt #faces.
 
@@ -259,6 +286,10 @@ def parse_city_objects(
             attrs.get("oorspronkelijkbouwjaar"), attrs.get("b3_dak_type"),
             cx + origin[0], cy + origin[1],
         )
+        if roof_sampler is not None:
+            measured = _measure_roof(faces, roof_sampler)
+            if measured is not None:  # echte dakkleur uit de luchtfoto wint
+                roof_style = (measured / _BASE_ROOF).astype(np.float32)
         cls_tint = {
             "roof": np.clip(roof_style * tint, 0, 1.6).astype(np.float32),
             "ground": tint,  # losse vloer/terrasvlakken: neutraal, valt weg in het terrein
@@ -307,6 +338,7 @@ def features_to_soup(
     origin_rd: np.ndarray,
     ground_sampler=None,
     clip_bounds: tuple[float, float, float, float] | None = None,
+    roof_sampler=None,
 ) -> TriangleSoup:
     """CityJSONFeatures van api.3dbag.nl -> TriangleSoup in lokale coordinaten."""
     soup = TriangleSoup()
@@ -328,6 +360,7 @@ def features_to_soup(
         total_faces += parse_city_objects(
             city_objects, vertices, soup, origin,
             ground_sampler=ground_sampler, clip_bounds=clip_bounds,
+            roof_sampler=roof_sampler,
         )
 
     log.info("gebouwen geparsed: %d faces", total_faces)

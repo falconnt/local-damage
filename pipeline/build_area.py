@@ -99,7 +99,33 @@ def build_tile(
     def ground(x: float, y: float) -> float:
         return terrain.sample_height(heights, res, x, y)
 
-    # 2) gebouwen (3D BAG LoD2.2), gesnapt op het terrein tegen zwevende huizen.
+    # 2) ondergronden uit de BGT (tolerant: zonder BGT blijft alles gras);
+    # eerst, want het watermasker stuurt ook de watervilla-gevels
+    surface_masks = {}
+    try:
+        surfaces = fetch_bgt.fetch_surfaces(bbox, cache_dir / area_id)
+        surface_masks = terrain.classify_cells(heights, res, surfaces, origin)
+    except Exception as exc:  # noqa: BLE001 — bewuste fallback, wijk blijft bruikbaar
+        log.warning("BGT-ondergronden overgeslagen: %s", exc)
+
+    water_near = None
+    if "water" in surface_masks and surface_masks["water"].any():
+        dil = surface_masks["water"].copy()
+        for _ in range(9):  # ruitvormige dilatatie: ~18 m van de oever
+            d2 = dil.copy()
+            d2[1:, :] |= dil[:-1, :]
+            d2[:-1, :] |= dil[1:, :]
+            d2[:, 1:] |= dil[:, :-1]
+            d2[:, :-1] |= dil[:, 1:]
+            dil = d2
+
+        def water_near(x, y, _dil=dil, _res=res):
+            r, c = int(y // _res), int(x // _res)
+            if 0 <= r < _dil.shape[0] and 0 <= c < _dil.shape[1]:
+                return bool(_dil[r, c])
+            return False
+
+    # 3) gebouwen (3D BAG LoD2.2), gesnapt op het terrein tegen zwevende huizen.
     # De PDOK-luchtfoto levert de echte dakkleur per pand (optioneel).
     metadata, features = fetch_3dbag.fetch_buildings(bbox, cache_dir / area_id)
     log.info("3dbag: %d features", len(features))
@@ -113,7 +139,7 @@ def build_tile(
     soup = cityjson.features_to_soup(
         metadata, features, origin,
         ground_sampler=ground, clip_bounds=(0.0, 0.0, size_x, size_y),
-        roof_sampler=roof_sampler,
+        roof_sampler=roof_sampler, water_near=water_near,
     )
     n_tris = sum(len(v) for v in soup.triangles.values())
     if n_tris == 0:
@@ -125,14 +151,6 @@ def build_tile(
             )
         # randtegels (weiland/bos) mogen leeg zijn: terrein + BGT blijven waardevol
         log.warning("tegel %s heeft geen gebouwen (weiland?) — doorgaan", area_id)
-
-    # 3) ondergronden uit de BGT (tolerant: zonder BGT blijft alles gras)
-    surface_masks = {}
-    try:
-        surfaces = fetch_bgt.fetch_surfaces(bbox, cache_dir / area_id)
-        surface_masks = terrain.classify_cells(heights, res, surfaces, origin)
-    except Exception as exc:  # noqa: BLE001 — bewuste fallback, wijk blijft bruikbaar
-        log.warning("BGT-ondergronden overgeslagen: %s", exc)
 
     # 3b) bomen op begroeid terrein (procedureel, geen open bomendataset)
     if "green" in surface_masks:

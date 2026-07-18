@@ -191,7 +191,7 @@ def _facade_details(faces, centroid2d, soup, jitter) -> None:
         zz = ring[:, 2]
         u0, u1 = float(uu.min()), float(uu.max())
         z0, z1 = float(zz.min()), float(zz.max())
-        if u1 - u0 < 2.4 or z1 - z0 < 2.4:
+        if u1 - u0 < 2.0 or z1 - z0 < 2.3:
             continue
         walls.append((ring, n, u, np.column_stack([uu, zz]), uu[0], u0, u1, z0, z1))
     if not walls:
@@ -212,7 +212,9 @@ def _facade_details(faces, centroid2d, soup, jitter) -> None:
             soup.add_polygon("trim", np.array(pts), tint)
 
         width = u1 - u0
-        ncols = int((width - 1.0) // 1.9)
+        ncols = int((width - 0.9) // 1.9)
+        if ncols <= 0 and width >= 2.1:
+            ncols = 1  # smalle gevel: toch 1 raam
         if ncols <= 0:
             continue
         start = u0 + (width - ncols * 1.9) / 2 + 0.95
@@ -327,6 +329,7 @@ def parse_city_objects(
     clip_bounds: tuple[float, float, float, float] | None = None,
     roof_sampler=None,
     style_ctx: dict | None = None,
+    water_near=None,
 ) -> int:
     """Voeg alle Building(Part)-geometrie toe aan de soup. Returnt #faces.
 
@@ -400,6 +403,11 @@ def parse_city_objects(
         )
         if measured_hex is not None:  # echte dakkleur uit de luchtfoto wint
             roof_style = (_hex(measured_hex) / _BASE_ROOF).astype(np.float32)
+        # watervilla's (o.a. Bosven/Visven-oevers): nieuwbouw aan het water
+        # is in 't Ven compleet wit gestuukt
+        year_v = int(attrs.get("oorspronkelijkbouwjaar") or 1995)
+        if water_near is not None and year_v >= 1990 and water_near(cx, cy):
+            wall_style = (_hex("#f0ece2") / _BASE_WALL).astype(np.float32)
         cls_tint = {
             "roof": np.clip(roof_style * tint, 0, 1.6).astype(np.float32),
             "ground": tint,  # losse vloer/terrasvlakken: neutraal, valt weg in het terrein
@@ -451,6 +459,7 @@ def features_to_soup(
     ground_sampler=None,
     clip_bounds: tuple[float, float, float, float] | None = None,
     roof_sampler=None,
+    water_near=None,
 ) -> TriangleSoup:
     """CityJSONFeatures van api.3dbag.nl -> TriangleSoup in lokale coordinaten."""
     soup = TriangleSoup()
@@ -473,7 +482,7 @@ def features_to_soup(
         total_faces += parse_city_objects(
             city_objects, vertices, soup, origin,
             ground_sampler=ground_sampler, clip_bounds=clip_bounds,
-            roof_sampler=roof_sampler, style_ctx=style_ctx,
+            roof_sampler=roof_sampler, style_ctx=style_ctx, water_near=water_near,
         )
 
     log.info("gebouwen geparsed: %d faces", total_faces)

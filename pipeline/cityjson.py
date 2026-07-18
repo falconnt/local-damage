@@ -99,8 +99,21 @@ def _measure_roof(faces, roof_sampler):
         lum = arr.mean(axis=1)
         arr = arr[lum >= np.quantile(lum, 0.4)]
     med = np.median(arr, axis=0)
-    best = min(_ROOF_SNAP, key=lambda h: float(((_hex(h) - med) ** 2).sum()))
-    return _hex(best)
+    return min(_ROOF_SNAP, key=lambda h: float(((_hex(h) - med) ** 2).sum()))
+
+
+# gemeten dakkleur -> gevel-familie: wijken met oranje daken hebben andere
+# gevels dan wijken met antraciet — zo krijgt elke buurt zijn eigen kleurstelling
+_ROOF_FAMILY = {
+    "#b5643f": "warm", "#9a4f34": "warm", "#8a5a40": "warm",
+    "#5e453a": "bruin",
+    "#46474f": "koel", "#6a6b70": "koel", "#2f3034": "koel", "#8a8b8e": "koel",
+}
+_WALLS_BY_ROOF = {
+    "warm": [("#a86048", 3), ({"low": "#b4623f", "high": "#e9e4d8"}, 2), ("#d5c49c", 1)],
+    "bruin": [("#8a6a52", 2), ("#a86048", 2)],
+    "koel": [({"low": "#b4623f", "high": "#e9e4d8"}, 3), ("#d8caaa", 2), ("#ece7dc", 1), ("#a89886", 1)],
+}
 
 
 def _pick_weighted(options, seed: str):
@@ -113,16 +126,20 @@ def _pick_weighted(options, seed: str):
     return options[0][0]
 
 
-def _era_style(year, dak_type, cx: float, cy: float):
+def _era_style(year, dak_type, cx: float, cy: float, roof_fam=None):
     """(muur-, dak-)stijl voor dit pand: periode + projectblok bepalen.
 
     Muurstijl is een kleurfactor, of een dict {low, high} voor het
-    twee-lagen-beeld (baksteen onder, stucwerk boven).
+    twee-lagen-beeld (baksteen onder, stucwerk boven). roof_fam (uit de
+    gemeten dakkleur) stuurt bij nieuwbouw de gevel-familie per buurt.
     """
     y = int(year) if year else 1995  # onbekend: aanname nieuwbouwwijk
     era_i = next(i for i, (until, _) in enumerate(_WALL_ERAS) if y < until)
     block = f"{int(cx // 60)}_{int(cy // 60)}_{era_i}"
-    picked = _pick_weighted(_WALL_ERAS[era_i][1], block + "w")
+    options = _WALL_ERAS[era_i][1]
+    if roof_fam and era_i >= 3:  # 1990+: gemeten kleurstelling van de buurt wint
+        options = _WALLS_BY_ROOF[roof_fam]
+    picked = _pick_weighted(options, block + "w" + (roof_fam or ""))
     if isinstance(picked, dict):
         wall = {k: (_hex(v) / _BASE_WALL).astype(np.float32) for k, v in picked.items()}
     else:
@@ -226,6 +243,7 @@ def parse_city_objects(
     ground_sampler=None,
     clip_bounds: tuple[float, float, float, float] | None = None,
     roof_sampler=None,
+    style_ctx: dict | None = None,
 ) -> int:
     """Voeg alle Building(Part)-geometrie toe aan de soup. Returnt #faces.
 
@@ -280,16 +298,25 @@ def parse_city_objects(
             if not (minx - 2 <= cx <= maxx + 2 and miny - 2 <= cy <= maxy + 2):
                 continue
 
-        # wijkstijl: bouwperiode + projectblok -> muur- en dakkleur (globale
-        # RD-coordinaten zodat het blok niet op een tegelrand omklapt)
+        # wijkstijl: gemeten dakkleur (luchtfoto) + bouwperiode + projectblok.
+        # De familie (warm/bruin/koel) wordt per blok onthouden zodat garages
+        # en buren dezelfde kleurstelling volgen als de wijk.
+        gx, gy = cx + origin[0], cy + origin[1]
+        dak_type = attrs.get("b3_dak_type")
+        measured_hex = _measure_roof(faces, roof_sampler) if roof_sampler is not None else None
+        block_key = f"{int(gx // 60)}_{int(gy // 60)}"
+        fam = None
+        if measured_hex and dak_type not in ("horizontal", "multiple horizontal"):
+            fam = _ROOF_FAMILY.get(measured_hex)
+            if fam and style_ctx is not None:
+                style_ctx.setdefault(block_key, fam)
+        if fam is None and style_ctx is not None:
+            fam = style_ctx.get(block_key)
         wall_style, roof_style = _era_style(
-            attrs.get("oorspronkelijkbouwjaar"), attrs.get("b3_dak_type"),
-            cx + origin[0], cy + origin[1],
+            attrs.get("oorspronkelijkbouwjaar"), dak_type, gx, gy, roof_fam=fam,
         )
-        if roof_sampler is not None:
-            measured = _measure_roof(faces, roof_sampler)
-            if measured is not None:  # echte dakkleur uit de luchtfoto wint
-                roof_style = (measured / _BASE_ROOF).astype(np.float32)
+        if measured_hex is not None:  # echte dakkleur uit de luchtfoto wint
+            roof_style = (_hex(measured_hex) / _BASE_ROOF).astype(np.float32)
         cls_tint = {
             "roof": np.clip(roof_style * tint, 0, 1.6).astype(np.float32),
             "ground": tint,  # losse vloer/terrasvlakken: neutraal, valt weg in het terrein
@@ -344,6 +371,7 @@ def features_to_soup(
     soup = TriangleSoup()
     meta_transform = (metadata or {}).get("transform")
     origin = np.asarray([origin_rd[0], origin_rd[1], 0.0], dtype=np.float64)
+    style_ctx: dict = {}  # blok -> gevel-familie, gedeeld over alle features
 
     total_faces = 0
     for feat in features:
@@ -360,7 +388,7 @@ def features_to_soup(
         total_faces += parse_city_objects(
             city_objects, vertices, soup, origin,
             ground_sampler=ground_sampler, clip_bounds=clip_bounds,
-            roof_sampler=roof_sampler,
+            roof_sampler=roof_sampler, style_ctx=style_ctx,
         )
 
     log.info("gebouwen geparsed: %d faces", total_faces)

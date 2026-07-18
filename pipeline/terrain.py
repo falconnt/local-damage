@@ -198,6 +198,28 @@ def classify_cells(
     return masks
 
 
+# marching-squares vulpolygonen: hoekpunten (x, y) in blok-lokale eenheden.
+# hoeken: p00=(0,0) p10=(1,0) p11=(1,1) p01=(0,1); randmiddens mb/mr/mt/ml.
+_P00, _P10, _P11, _P01 = (0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)
+_MB, _MR, _MT, _ML = (0.5, 0.0), (1.0, 0.5), (0.5, 1.0), (0.0, 0.5)
+_MS_POLY = {
+    1: [_P00, _MB, _ML],
+    2: [_P10, _MR, _MB],
+    3: [_P00, _P10, _MR, _ML],
+    4: [_P11, _MT, _MR],
+    5: [_P00, _MB, _MR, _P11, _MT, _ML],
+    6: [_P10, _P11, _MT, _MB],
+    7: [_P00, _P10, _P11, _MT, _ML],
+    8: [_P01, _ML, _MT],
+    9: [_P00, _MB, _MT, _P01],
+    10: [_P10, _MR, _MT, _P01, _ML, _MB],
+    11: [_P00, _P10, _MR, _MT, _P01],
+    12: [_ML, _MR, _P11, _P01],
+    13: [_P00, _MB, _MR, _P11, _P01],
+    14: [_MB, _P10, _P11, _P01, _ML],
+}
+
+
 def overlay_from_mask(
     heights: np.ndarray,
     resolution_m: float,
@@ -206,39 +228,68 @@ def overlay_from_mask(
     lift: float,
     normals: np.ndarray | None = None,
 ) -> Mesh | None:
-    """Bouw een gedrapeerde mesh uit de gemaskeerde gridcellen (volgt terrein)."""
+    """Gedrapeerde mesh uit de gemaskeerde cellen, met gladde randen.
+
+    Marching squares over de celmiddens: de rand ligt op de oude celgrens,
+    maar hoeken worden op 45 graden afgesneden — paden en groenvlakken ogen
+    als vectorvormen in plaats van blokjes. De maskerrand wordt gerepliceerd
+    zodat vlakken tot aan de tegelrand doorlopen (geen naden tussen tegels).
+    """
     if not mask.any():
         return None
-    rows, cols = heights.shape
     if normals is None:
         normals = normals_grid(heights, resolution_m)
+    res = resolution_m
+    rows, cols = heights.shape
+    max_x, max_y = (cols - 1) * res, (rows - 1) * res
 
-    # welke gridknopen zijn in gebruik door de geselecteerde cellen?
-    used = np.zeros((rows, cols), dtype=bool)
-    cell_r, cell_c = np.nonzero(mask)
-    for dr, dc in ((0, 0), (0, 1), (1, 0), (1, 1)):
-        used[cell_r + dr, cell_c + dc] = True
-
-    node_index = np.full((rows, cols), -1, dtype=np.int64)
-    ur, uc = np.nonzero(used)
-    node_index[ur, uc] = np.arange(len(ur))
-
-    positions = np.column_stack(
-        [uc * resolution_m, ur * resolution_m, heights[ur, uc] + lift]
-    ).astype(np.float32)
-    nrm = normals[ur, uc].astype(np.float32)
+    m = np.pad(mask.astype(np.int8), 1, mode="edge")
+    r_, c_ = m.shape
+    case = (m[:-1, :-1] + 2 * m[:-1, 1:] + 4 * m[1:, 1:] + 8 * m[1:, :-1])
 
     rng = np.random.default_rng(hash(cls) % (2**32))
-    tint = 0.94 + 0.06 * rng.random((len(ur), 1))
-    colors = np.repeat(tint, 3, axis=1).astype(np.float32)
+    positions, nrm_list, colors, indices = [], [], [], []
+    vert_cache: dict[tuple[int, int], int] = {}
 
-    a = node_index[cell_r, cell_c]
-    b = node_index[cell_r, cell_c + 1]
-    c = node_index[cell_r + 1, cell_c]
-    d = node_index[cell_r + 1, cell_c + 1]
-    indices = np.column_stack([a, b, c, b, d, c]).ravel().astype(np.uint32)
+    def vertex(x: float, y: float) -> int:
+        x = min(max(x, 0.0), max_x)
+        y = min(max(y, 0.0), max_y)
+        key = (int(round(x * 4)), int(round(y * 4)))  # dedupe op kwartmeters
+        idx = vert_cache.get(key)
+        if idx is not None:
+            return idx
+        z = sample_height(heights, res, x, y) + lift
+        rr = min(int(round(y / res)), rows - 1)
+        cc = min(int(round(x / res)), cols - 1)
+        idx = len(positions)
+        positions.append((x, y, z))
+        nrm_list.append(normals[rr, cc])
+        t = 0.94 + 0.06 * rng.random()
+        colors.append((t, t, t))
+        vert_cache[key] = idx
+        return idx
 
-    return Mesh("class:" + cls, cls, positions, nrm, colors, indices)
+    br, bc = np.nonzero(case)
+    for r, c in zip(br, bc):
+        poly = _MS_POLY.get(int(case[r, c]))
+        if poly is None:  # case 15: vol blok
+            poly = [_P00, _P10, _P11, _P01]
+        # blok-oorsprong: celmidden (c-1, r-1) van het ongepadde masker
+        ox = (c - 0.5) * res
+        oy = (r - 0.5) * res
+        ids = [vertex(ox + px * res, oy + py * res) for px, py in poly]
+        for k in range(1, len(ids) - 1):  # waaier-triangulatie (convex)
+            indices.extend((ids[0], ids[k], ids[k + 1]))
+
+    if not indices:
+        return None
+    return Mesh(
+        "class:" + cls, cls,
+        np.asarray(positions, dtype=np.float32),
+        np.asarray(nrm_list, dtype=np.float32),
+        np.asarray(colors, dtype=np.float32),
+        np.asarray(indices, dtype=np.uint32),
+    )
 
 
 def sample_height(heights: np.ndarray, resolution_m: float, x: float, y: float) -> float:

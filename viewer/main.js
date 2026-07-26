@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VERSION } from './version.js';
 import { sfx, ensureAudio } from './game/sfx.js';
+import { createMinimap } from './minimap.js';
 
 const TILE_PATHS = ['tiles/', '../dist/tiles/']; // Pages-layout, daarna lokale dev-layout
 const EYE_HEIGHT = 1.7;
@@ -274,6 +275,9 @@ async function initRegion(base, region) {
     entry, state: 'none', group: null, meshes: [], walkables: [], labelRefs: null,
   }));
 
+  minimap.loadNav(); // 4m-wegraster van de hele regio (async, klein)
+  setupNav();
+
   const sx = region.spawn_rd[0] - wox;
   const sz = -(region.spawn_rd[1] - woy);
 
@@ -334,6 +338,7 @@ async function loadTile(rec, progressLabel = null) {
     }
     applyLabelDetail(); // nieuw geladen bordjes/bomen meteen op het kwaliteitsniveau zetten
     rec.state = 'loaded';
+    minimap.tileLoaded(rec);
   } catch (err) {
     console.warn('tegel laden mislukt:', rec.entry.id, err);
     rec.state = 'none';
@@ -362,6 +367,7 @@ function unloadTile(rec) {
       for (const obj of rec.labelRefs[key]) obj.geometry?.dispose(); // textures blijven gecachet
     }
   }
+  minimap.tileUnloaded(rec);
   Object.assign(rec, { state: 'none', group: null, meshes: [], walkables: [], labelRefs: null });
 }
 
@@ -844,12 +850,64 @@ const engine = {
   worldOrigin: () => state.world?.origin ?? [0, 0],
 };
 
+const minimap = createMinimap({ state, camera });
+
+// navigatiepaneel: straat kiezen -> route op de minimap + waypoint
+function setupNav() {
+  const btn = document.getElementById('nav-btn');
+  const panel = document.getElementById('nav-panel');
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation(); sfx.click();
+    panel.classList.toggle('hidden');
+    const streets = await collectStreets();
+    const dl = document.getElementById('street-list');
+    if (!dl.childElementCount) {
+      for (const st of streets) {
+        const opt = document.createElement('option');
+        opt.value = st.name;
+        dl.appendChild(opt);
+      }
+    }
+    document.getElementById('nav-input').focus();
+  });
+  const go = () => {
+    const name = document.getElementById('nav-input').value.trim().toLowerCase();
+    const st = (state.streetIndex ?? []).find((s2) => s2.name.toLowerCase() === name)
+      ?? (state.streetIndex ?? []).find((s2) => s2.name.toLowerCase().startsWith(name) && name.length >= 3);
+    if (!st) return;
+    const ok = minimap.navigateTo(st.x, st.z);
+    if (ok) {
+      state.waypoint = new THREE.Vector3(st.x, groundHeight(st.x, st.z) ?? 0, st.z);
+      hud('🧭 ' + st.name, 'volg de gele route op de kaart');
+    } else {
+      hud('🧭', 'geen route gevonden — nav-data ontbreekt nog voor dit gebied');
+    }
+    panel.classList.add('hidden');
+    sfx.click();
+  };
+  document.getElementById('nav-go').addEventListener('click', (e) => { e.stopPropagation(); go(); });
+  document.getElementById('nav-input').addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') go();
+  });
+  document.getElementById('nav-stop').addEventListener('click', (e) => {
+    e.stopPropagation(); sfx.click();
+    minimap.clearRoute();
+    state.waypoint = null;
+    panel.classList.add('hidden');
+    hud('LOCAL DAMAGE');
+  });
+}
+
 function showMenu() {
   state.started = false;
   if (activeMode) { activeMode.exit?.(); activeMode = null; }
   hud(null);
   showActions(null);
   document.getElementById('menu-btn').style.display = 'none';
+  document.getElementById('minimap').style.display = 'none';
+  document.getElementById('nav-btn').style.display = 'none';
+  document.getElementById('nav-panel').classList.add('hidden');
   document.getElementById('car-select').classList.add('hidden');
   document.getElementById('start-select').classList.add('hidden');
   document.getElementById('settings').classList.add('hidden');
@@ -984,6 +1042,8 @@ async function startMode(name) {
   if (activeMode) { activeMode.exit?.(); activeMode = null; }
   document.getElementById('overlay').classList.add('hidden');
   document.getElementById('menu-btn').style.display = 'block';
+  document.getElementById('minimap').style.display = 'block';
+  document.getElementById('nav-btn').style.display = name === 'free' ? 'block' : 'none';
   document.getElementById('fly-btn').style.display = name === 'free' ? 'block' : 'none';
   state.started = true;
   if (isTouchDevice()) document.documentElement.requestFullscreen?.().catch(() => {});
@@ -1046,6 +1106,8 @@ function tick() {
       state.roadSnap = null; // tegel komt niet: laat staan waar hij is
     }
   }
+
+  if (state.started) minimap.update(dt);
 
   if (state.started && activeMode) {
     activeMode.tick(dt); // spelmodus stuurt beweging én camera zelf
@@ -1117,7 +1179,7 @@ function tick() {
 
 // debug/test-hook (harmloos in productie)
 window.__ld = {
-  camera, state, labelState, engine, startMode, getMode: () => activeMode,
+  camera, state, labelState, engine, startMode, minimap, getMode: () => activeMode,
   quality: () => ({ pref: qualityPref, level: qualityLevel, pr: renderer.getPixelRatio(),
     shadows: renderer.shadowMap.enabled, far: camera.far, load: TILE_LOAD_M, fog: scene.fog?.far }),
   renderer, applyQuality: (l) => applyQuality(l), setQualityPref: (p) => setQualityPref(p),

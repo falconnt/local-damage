@@ -176,6 +176,25 @@ def build_tile(
     except Exception as exc:  # noqa: BLE001
         log.warning("BAG-adressen overgeslagen: %s", exc)
 
+    # 5) navigatieraster: wegcellen op 4 m, compact gepakt — de client bouwt
+    # hier de routeplanner (A*) mee, ook voor nog niet gestreamde tegels
+    nav_file = None
+    if "road" in surface_masks and surface_masks["road"].any():
+        import base64
+        rm = surface_masks["road"]
+        step = max(1, int(round(4.0 / res)))
+        rr = rm.shape[0] // step * step
+        cc = rm.shape[1] // step * step
+        small = rm[:rr, :cc].reshape(rr // step, step, cc // step, step).any(axis=(1, 3))
+        nav = {
+            "res_m": res * step,
+            "rows": int(small.shape[0]),
+            "cols": int(small.shape[1]),
+            "road": base64.b64encode(np.packbits(small.astype(np.uint8), axis=None).tobytes()).decode(),
+        }
+        nav_file = f"{area_id}-nav.json"
+        (out_dir / nav_file).write_text(json.dumps(nav))
+
     meshes = assemble_meshes(heights, res, soup, surface_masks)
     out = glb.write_glb(
         meshes,
@@ -191,6 +210,8 @@ def build_tile(
     }
     if addresses_file:
         entry["addresses"] = addresses_file
+    if nav_file:
+        entry["nav"] = nav_file
     return entry
 
 

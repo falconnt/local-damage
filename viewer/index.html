@@ -96,6 +96,27 @@
     #street-pick button { border: 1px solid rgba(255,255,255,0.4); background: rgba(255,178,125,0.85);
       color: #1a1d2a; font-weight: 700; padding: 0.5rem 1.1rem; border-radius: 999px; cursor: pointer; }
 
+    #minimap { position: fixed; top: calc(0.6rem + env(safe-area-inset-top));
+      right: calc(0.7rem + env(safe-area-inset-right)); z-index: 5;
+      width: 176px; height: 176px; pointer-events: none; }
+    #nav-btn { position: fixed; top: calc(0.6rem + 180px + env(safe-area-inset-top));
+      right: calc(0.7rem + env(safe-area-inset-right)); z-index: 6;
+      width: 2.6rem; height: 2.6rem; border-radius: 50%; font-size: 1.1rem;
+      border: 1px solid rgba(255,255,255,0.35); background: rgba(20,22,38,0.55); color: #fff; cursor: pointer; }
+    #nav-panel { position: fixed; top: calc(0.6rem + 180px + env(safe-area-inset-top));
+      right: calc(3.6rem + env(safe-area-inset-right)); z-index: 6; display: flex; gap: 0.3rem; }
+    #nav-panel.hidden { display: none; }
+    #nav-panel input { border-radius: 999px; border: 1px solid rgba(255,255,255,0.35);
+      background: rgba(20,22,38,0.75); color: #fff; padding: 0.45rem 0.9rem; font: inherit; width: 11rem; }
+    #nav-panel button { border: 1px solid rgba(255,255,255,0.4); border-radius: 999px;
+      background: rgba(255,178,125,0.85); color: #1a1d2a; font-weight: 700; padding: 0.45rem 0.8rem; cursor: pointer; }
+    #nav-panel #nav-stop { background: rgba(20,22,38,0.75); color: #fff; }
+    @media (max-width: 700px) {
+      #minimap { width: 128px; height: 128px; }
+      #nav-btn { top: calc(0.6rem + 132px + env(safe-area-inset-top)); }
+      #nav-panel { top: calc(0.6rem + 132px + env(safe-area-inset-top)); }
+    }
+
     #footer { position: fixed; bottom: calc(0.45rem + env(safe-area-inset-bottom)); left: 0; right: 0; z-index: 5;
       text-align: center; color: rgba(255,255,255,0.55); font-size: 0.65rem; pointer-events: none; padding: 0 1rem; }
     #footer a { color: rgba(255,255,255,0.75); pointer-events: auto; }
@@ -206,6 +227,14 @@
   </div>
 
   <div id="waypoint"><span class="arrow">➤</span><span class="dist"></span></div>
+
+  <canvas id="minimap" style="display:none"></canvas>
+  <button id="nav-btn" type="button" style="display:none" title="navigatie">🧭</button>
+  <div id="nav-panel" class="hidden">
+    <input id="nav-input" list="street-list" placeholder="waarheen?" autocomplete="off" />
+    <button id="nav-go" type="button">ga</button>
+    <button id="nav-stop" type="button">✕</button>
+  </div>
 
   <div id="footer">
     <span id="version">v?</span>

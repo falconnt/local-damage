@@ -75,6 +75,7 @@ def build_tile(
     out_dir: Path,
     cache_dir: Path,
     require_buildings: bool = True,
+    require_surfaces: bool = False,
 ) -> dict:
     """Bouw één tegel (GLB + bordjes-JSON) voor de gegeven RD-bbox."""
     from . import fetch_3dbag, fetch_ahn, fetch_bag, fetch_bgt, fetch_luchtfoto, labels  # lazy: online route
@@ -107,6 +108,10 @@ def build_tile(
         surface_masks = terrain.classify_cells(heights, res, surfaces, origin)
     except Exception as exc:  # noqa: BLE001 — bewuste fallback, wijk blijft bruikbaar
         log.warning("BGT-ondergronden overgeslagen: %s", exc)
+    if require_surfaces and "road" not in surface_masks:
+        # kerntegel zonder wegen = kapotte BGT-bron; liever falen (tiles-data
+        # houdt de vorige goede versie vast) dan een kale wereld publiceren
+        raise RuntimeError(f"geen BGT-wegen voor kerntegel {area_id} — BGT-API kapot?")
 
     water_near = None
     if "water" in surface_masks and surface_masks["water"].any():
@@ -261,6 +266,7 @@ def build_region(config_path: Path, out_dir: Path, cache_dir: Path) -> dict:
             entry = build_tile(
                 tile_id, bbox, res, out_dir, cache_dir,
                 require_buildings=is_center,  # alleen de kern moet raak zijn
+                require_surfaces=is_center,   # en met wegen (BGT-bron gezond)
             )
         except Exception as exc:  # noqa: BLE001 — 1 hapering mag de regio niet slopen
             if is_center:

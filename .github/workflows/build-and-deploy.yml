@@ -49,6 +49,21 @@ jobs:
             fetch-cache-${{ hashFiles('data-sources/*.json') }}-
             fetch-cache-
 
+      - name: Cache-vangnet (ontbrekende ruwe API-cache aanvullen uit tiles-data)
+        run: |
+          git fetch --depth 1 origin tiles-data 2>/dev/null || exit 0
+          rm -rf /tmp/_dbg && mkdir -p /tmp/_dbg .cache
+          git archive FETCH_HEAD _debug 2>/dev/null | tar -x --strip-components=1 -C /tmp/_dbg || exit 0
+          for d in /tmp/_dbg/*/; do
+            tile="$(basename "$d")"
+            mkdir -p ".cache/$tile"
+            for f in "$d"*; do
+              b="$(basename "$f")"
+              [ -e ".cache/$tile/$b" ] || cp -r "$f" ".cache/$tile/$b"
+            done
+          done
+          echo "cache aangevuld vanaf tiles-data (_debug): $(ls /tmp/_dbg | wc -l) tegel-caches"
+
       - name: Assemble site (viewer + demo-fallback-tiles)
         run: |
           mkdir -p site/tiles
@@ -57,14 +72,9 @@ jobs:
 
       - name: Build real area from open data (AHN + 3D BAG)
         id: realbuild
-        continue-on-error: true
         run: |
           AREA="${{ github.event.inputs.area || 'bosven-veghel' }}"
           python -m pipeline.build_area --config "data-sources/${AREA}.json" --out site/tiles --cache .cache
-
-      - name: Report fallback
-        if: steps.realbuild.outcome == 'failure'
-        run: echo "::warning::Open-data-build mislukt — site deployt met synthetische demo-wijk. Zie cache-artifact voor de ruwe API-antwoorden."
 
       # tiles ook naar een data-branch: reviewbaar/clonebaar zonder Pages.
       # de ruwe API-cache gaat mee (alleen in de branch, niet naar Pages).

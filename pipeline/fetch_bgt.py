@@ -19,7 +19,14 @@ from .crs import rd_bbox_to_wgs84, wgs84_to_rd
 
 log = logging.getLogger(__name__)
 
-API_BASE = "https://api.pdok.nl/lv/bgt/ogc/v1"
+# PDOK verhuist OGC-endpoints af en toe (juli 2026: /ogc/v1 gaf ineens 404 op
+# items). Daarom: kandidaat-bases proberen en de collectienamen zelf ontdekken
+# via de /collections-lijst in plaats van ze hard te coderen.
+API_BASES = [
+    "https://api.pdok.nl/lv/bgt/ogc/v1",
+    "https://api.pdok.nl/lv/bgt/ogc/v1_0",
+    "https://api.pdok.nl/lv/bgt/ogc/features/v1",
+]
 
 # BGT-collectie -> onze render-klasse
 COLLECTIONS = {
@@ -30,6 +37,35 @@ COLLECTIONS = {
 }
 PAGE_LIMIT = 1000
 MAX_PAGES = 20
+
+_resolved: dict | None = None  # {"base": url, "ids": {gewenst -> echt collection-id}}
+
+
+def _resolve_api(session: requests.Session) -> dict:
+    """Vind een werkende API-basis + de echte collection-id's (bv. hernoemd)."""
+    global _resolved
+    if _resolved is not None:
+        return _resolved
+    last_exc: Exception | None = None
+    for base in API_BASES:
+        try:
+            data = _get_json(session, f"{base}/collections", {"f": "json"}, tries=2)
+            ids = [c.get("id") for c in data.get("collections", []) if c.get("id")]
+            mapping = {}
+            for wanted in COLLECTIONS:
+                exact = wanted if wanted in ids else None
+                fuzzy = next((i for i in ids if wanted in i), None)
+                if exact or fuzzy:
+                    mapping[wanted] = exact or fuzzy
+            if mapping:
+                _resolved = {"base": base, "ids": mapping}
+                log.info("bgt-api gevonden: %s — collecties %s", base, mapping)
+                return _resolved
+            log.warning("bgt-basis %s heeft geen passende collecties (ids: %s)", base, ids[:12])
+        except Exception as exc:  # noqa: BLE001 — volgende kandidaat proberen
+            last_exc = exc
+            log.warning("bgt-basis %s niet bruikbaar (%s)", base, exc)
+    raise RuntimeError(f"geen werkende BGT OGC API gevonden: {last_exc}")
 
 
 def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, list[list[np.ndarray]]]:
@@ -53,14 +89,23 @@ def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, lis
         n_feats = 0
         marker = cache / f"_bgt_{collection}_complete.json"
         cached_pages = json.loads(marker.read_text())["pages"] if marker.exists() else None
-        url = f"{API_BASE}/collections/{collection}/items"
+        url: str | None = None  # netwerk-URL wordt pas gezet na API-resolutie
         params: dict | None = {"bbox": bbox_wgs, "limit": PAGE_LIMIT, "f": "json"}
+        fetched = 0
         for page in range(cached_pages if cached_pages is not None else MAX_PAGES):
             if cached_pages is not None:
                 data = json.loads((cache / f"bgt_{collection}_{page:02d}.json").read_text())
             else:
+                if url is None:
+                    api = _resolve_api(session)
+                    coll_id = api["ids"].get(collection)
+                    if coll_id is None:
+                        log.warning("bgt-collectie %s ontbreekt in de API — overgeslagen", collection)
+                        break
+                    url = f"{api['base']}/collections/{coll_id}/items"
                 data = _get_json(session, url, params)
                 (cache / f"bgt_{collection}_{page:02d}.json").write_text(json.dumps(data))
+                fetched += 1
             for feat in data.get("features", []):
                 props = feat.get("properties") or {}
                 # bruggen/tunnels (relatieve hoogteligging != 0) niet op maaiveld verven
@@ -73,9 +118,9 @@ def fetch_surfaces(bbox_rd: list[float], cache_dir: str | Path) -> dict[str, lis
             if not next_url:
                 break
             url, params = next_url, None
-        if cached_pages is None:
-            marker.write_text(json.dumps({"pages": page + 1}))
-        else:
+        if cached_pages is None and fetched > 0:
+            marker.write_text(json.dumps({"pages": fetched}))
+        elif cached_pages is not None:
             log.info("bgt %s uit cache", collection)
         log.info("bgt %s: %d features, %d polygonen", collection, n_feats, len(polygons))
         result[cls] = polygons

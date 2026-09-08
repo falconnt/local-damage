@@ -1,0 +1,606 @@
+{
+  "version": 2,
+  "areas": [
+    {
+      "id": "demo",
+      "name": "Demo \u2014 synthetische wijk",
+      "file": "demo.glb",
+      "addresses": "demo-addresses.json",
+      "synthetic": true,
+      "size_m": 400.0
+    }
+  ],
+  "regions": [
+    {
+      "id": "bosven-veghel",
+      "name": "Bosven \u2014 Veghel ('t Ven West)",
+      "tile_size_m": 500.0,
+      "spawn_rd": [
+        166285.948,
+        404877.849
+      ],
+      "tiles": [
+        {
+          "id": "bosven-veghel_x332_y809",
+          "file": "bosven-veghel_x332_y809.glb",
+          "origin_rd": [
+            166000.0,
+            404500.0
+          ],
+          "bbox_rd": [
+            166000.0,
+            404500.0,
+            166500.0,
+            405000.0
+          ],
+          "addresses": "bosven-veghel_x332_y809-addresses.json",
+          "nav": "bosven-veghel_x332_y809-nav.json",
+          "tx": 332,
+          "ty": 809
+        },
+        {
+          "id": "bosven-veghel_x331_y808",
+          "file": "bosven-veghel_x331_y808.glb",
+          "origin_rd": [
+            165500.0,
+            404000.0
+          ],
+          "bbox_rd": [
+            165500.0,
+            404000.0,
+            166000.0,
+            404500.0
+          ],
+          "addresses": "bosven-veghel_x331_y808-addresses.json",
+          "nav": "bosven-veghel_x331_y808-nav.json",
+          "tx": 331,
+          "ty": 808
+        },
+        {
+          "id": "bosven-veghel_x332_y808",
+          "file": "bosven-veghel_x332_y808.glb",
+          "origin_rd": [
+            166000.0,
+            404000.0
+          ],
+          "bbox_rd": [
+            166000.0,
+            404000.0,
+            166500.0,
+            404500.0
+          ],
+          "addresses": "bosven-veghel_x332_y808-addresses.json",
+          "nav": "bosven-veghel_x332_y808-nav.json",
+          "tx": 332,
+          "ty": 808
+        },
+        {
+          "id": "bosven-veghel_x333_y808",
+          "file": "bosven-veghel_x333_y808.glb",
+          "origin_rd": [
+            166500.0,
+            404000.0
+          ],
+          "bbox_rd": [
+            166500.0,
+            404000.0,
+            167000.0,
+            404500.0
+          ],
+          "addresses": "bosven-veghel_x333_y808-addresses.json",
+          "nav": "bosven-veghel_x333_y808-nav.json",
+          "tx": 333,
+          "ty": 808
+        },
+        {
+          "id": "bosven-veghel_x331_y809",
+          "file": "bosven-veghel_x331_y809.glb",
+          "origin_rd": [
+            165500.0,
+            404500.0
+          ],
+          "bbox_rd": [
+            165500.0,
+            404500.0,
+            166000.0,
+            405000.0
+          ],
+          "addresses": "bosven-veghel_x331_y809-addresses.json",
+          "nav": "bosven-veghel_x331_y809-nav.json",
+          "tx": 331,
+          "ty": 809
+        },
+        {
+          "id": "bosven-veghel_x333_y809",
+          "file": "bosven-veghel_x333_y809.glb",
+          "origin_rd": [
+            166500.0,
+            404500.0
+          ],
+          "bbox_rd": [
+            166500.0,
+            404500.0,
+            167000.0,
+            405000.0
+          ],
+          "addresses": "bosven-veghel_x333_y809-addresses.json",
+          "nav": "bosven-veghel_x333_y809-nav.json",
+          "tx": 333,
+          "ty": 809
+        },
+        {
+          "id": "bosven-veghel_x331_y810",
+          "file": "bosven-veghel_x331_y810.glb",
+          "origin_rd": [
+            165500.0,
+            405000.0
+          ],
+          "bbox_rd": [
+            165500.0,
+            405000.0,
+            166000.0,
+            405500.0
+          ],
+          "nav": "bosven-veghel_x331_y810-nav.json",
+          "tx": 331,
+          "ty": 810
+        },
+        {
+          "id": "bosven-veghel_x332_y810",
+          "file": "bosven-veghel_x332_y810.glb",
+          "origin_rd": [
+            166000.0,
+            405000.0
+          ],
+          "bbox_rd": [
+            166000.0,
+            405000.0,
+            166500.0,
+            405500.0
+          ],
+          "addresses": "bosven-veghel_x332_y810-addresses.json",
+          "nav": "bosven-veghel_x332_y810-nav.json",
+          "tx": 332,
+          "ty": 810
+        },
+        {
+          "id": "bosven-veghel_x333_y810",
+          "file": "bosven-veghel_x333_y810.glb",
+          "origin_rd": [
+            166500.0,
+            405000.0
+          ],
+          "bbox_rd": [
+            166500.0,
+            405000.0,
+            167000.0,
+            405500.0
+          ],
+          "addresses": "bosven-veghel_x333_y810-addresses.json",
+          "nav": "bosven-veghel_x333_y810-nav.json",
+          "tx": 333,
+          "ty": 810
+        },
+        {
+          "id": "bosven-veghel_x330_y807",
+          "file": "bosven-veghel_x330_y807.glb",
+          "origin_rd": [
+            165000.0,
+            403500.0
+          ],
+          "bbox_rd": [
+            165000.0,
+            403500.0,
+            165500.0,
+            404000.0
+          ],
+          "addresses": "bosven-veghel_x330_y807-addresses.json",
+          "nav": "bosven-veghel_x330_y807-nav.json",
+          "tx": 330,
+          "ty": 807
+        },
+        {
+          "id": "bosven-veghel_x331_y807",
+          "file": "bosven-veghel_x331_y807.glb",
+          "origin_rd": [
+            165500.0,
+            403500.0
+          ],
+          "bbox_rd": [
+            165500.0,
+            403500.0,
+            166000.0,
+            404000.0
+          ],
+          "addresses": "bosven-veghel_x331_y807-addresses.json",
+          "nav": "bosven-veghel_x331_y807-nav.json",
+          "tx": 331,
+          "ty": 807
+        },
+        {
+          "id": "bosven-veghel_x332_y807",
+          "file": "bosven-veghel_x332_y807.glb",
+          "origin_rd": [
+            166000.0,
+            403500.0
+          ],
+          "bbox_rd": [
+            166000.0,
+            403500.0,
+            166500.0,
+            404000.0
+          ],
+          "addresses": "bosven-veghel_x332_y807-addresses.json",
+          "nav": "bosven-veghel_x332_y807-nav.json",
+          "tx": 332,
+          "ty": 807
+        },
+        {
+          "id": "bosven-veghel_x333_y807",
+          "file": "bosven-veghel_x333_y807.glb",
+          "origin_rd": [
+            166500.0,
+            403500.0
+          ],
+          "bbox_rd": [
+            166500.0,
+            403500.0,
+            167000.0,
+            404000.0
+          ],
+          "addresses": "bosven-veghel_x333_y807-addresses.json",
+          "nav": "bosven-veghel_x333_y807-nav.json",
+          "tx": 333,
+          "ty": 807
+        },
+        {
+          "id": "bosven-veghel_x334_y807",
+          "file": "bosven-veghel_x334_y807.glb",
+          "origin_rd": [
+            167000.0,
+            403500.0
+          ],
+          "bbox_rd": [
+            167000.0,
+            403500.0,
+            167500.0,
+            404000.0
+          ],
+          "addresses": "bosven-veghel_x334_y807-addresses.json",
+          "nav": "bosven-veghel_x334_y807-nav.json",
+          "tx": 334,
+          "ty": 807
+        },
+        {
+          "id": "bosven-veghel_x330_y808",
+          "file": "bosven-veghel_x330_y808.glb",
+          "origin_rd": [
+            165000.0,
+            404000.0
+          ],
+          "bbox_rd": [
+            165000.0,
+            404000.0,
+            165500.0,
+            404500.0
+          ],
+          "addresses": "bosven-veghel_x330_y808-addresses.json",
+          "nav": "bosven-veghel_x330_y808-nav.json",
+          "tx": 330,
+          "ty": 808
+        },
+        {
+          "id": "bosven-veghel_x334_y808",
+          "file": "bosven-veghel_x334_y808.glb",
+          "origin_rd": [
+            167000.0,
+            404000.0
+          ],
+          "bbox_rd": [
+            167000.0,
+            404000.0,
+            167500.0,
+            404500.0
+          ],
+          "addresses": "bosven-veghel_x334_y808-addresses.json",
+          "nav": "bosven-veghel_x334_y808-nav.json",
+          "tx": 334,
+          "ty": 808
+        },
+        {
+          "id": "bosven-veghel_x330_y809",
+          "file": "bosven-veghel_x330_y809.glb",
+          "origin_rd": [
+            165000.0,
+            404500.0
+          ],
+          "bbox_rd": [
+            165000.0,
+            404500.0,
+            165500.0,
+            405000.0
+          ],
+          "addresses": "bosven-veghel_x330_y809-addresses.json",
+          "nav": "bosven-veghel_x330_y809-nav.json",
+          "tx": 330,
+          "ty": 809
+        },
+        {
+          "id": "bosven-veghel_x334_y809",
+          "file": "bosven-veghel_x334_y809.glb",
+          "origin_rd": [
+            167000.0,
+            404500.0
+          ],
+          "bbox_rd": [
+            167000.0,
+            404500.0,
+            167500.0,
+            405000.0
+          ],
+          "addresses": "bosven-veghel_x334_y809-addresses.json",
+          "nav": "bosven-veghel_x334_y809-nav.json",
+          "tx": 334,
+          "ty": 809
+        },
+        {
+          "id": "bosven-veghel_x330_y810",
+          "file": "bosven-veghel_x330_y810.glb",
+          "origin_rd": [
+            165000.0,
+            405000.0
+          ],
+          "bbox_rd": [
+            165000.0,
+            405000.0,
+            165500.0,
+            405500.0
+          ],
+          "addresses": "bosven-veghel_x330_y810-addresses.json",
+          "nav": "bosven-veghel_x330_y810-nav.json",
+          "tx": 330,
+          "ty": 810
+        },
+        {
+          "id": "bosven-veghel_x334_y810",
+          "file": "bosven-veghel_x334_y810.glb",
+          "origin_rd": [
+            167000.0,
+            405000.0
+          ],
+          "bbox_rd": [
+            167000.0,
+            405000.0,
+            167500.0,
+            405500.0
+          ],
+          "addresses": "bosven-veghel_x334_y810-addresses.json",
+          "nav": "bosven-veghel_x334_y810-nav.json",
+          "tx": 334,
+          "ty": 810
+        },
+        {
+          "id": "bosven-veghel_x330_y811",
+          "file": "bosven-veghel_x330_y811.glb",
+          "origin_rd": [
+            165000.0,
+            405500.0
+          ],
+          "bbox_rd": [
+            165000.0,
+            405500.0,
+            165500.0,
+            406000.0
+          ],
+          "addresses": "bosven-veghel_x330_y811-addresses.json",
+          "nav": "bosven-veghel_x330_y811-nav.json",
+          "tx": 330,
+          "ty": 811
+        },
+        {
+          "id": "bosven-veghel_x331_y811",
+          "file": "bosven-veghel_x331_y811.glb",
+          "origin_rd": [
+            165500.0,
+            405500.0
+          ],
+          "bbox_rd": [
+            165500.0,
+            405500.0,
+            166000.0,
+            406000.0
+          ],
+          "addresses": "bosven-veghel_x331_y811-addresses.json",
+          "nav": "bosven-veghel_x331_y811-nav.json",
+          "tx": 331,
+          "ty": 811
+        },
+        {
+          "id": "bosven-veghel_x332_y811",
+          "file": "bosven-veghel_x332_y811.glb",
+          "origin_rd": [
+            166000.0,
+            405500.0
+          ],
+          "bbox_rd": [
+            166000.0,
+            405500.0,
+            166500.0,
+            406000.0
+          ],
+          "addresses": "bosven-veghel_x332_y811-addresses.json",
+          "nav": "bosven-veghel_x332_y811-nav.json",
+          "tx": 332,
+          "ty": 811
+        },
+        {
+          "id": "bosven-veghel_x333_y811",
+          "file": "bosven-veghel_x333_y811.glb",
+          "origin_rd": [
+            166500.0,
+            405500.0
+          ],
+          "bbox_rd": [
+            166500.0,
+            405500.0,
+            167000.0,
+            406000.0
+          ],
+          "addresses": "bosven-veghel_x333_y811-addresses.json",
+          "nav": "bosven-veghel_x333_y811-nav.json",
+          "tx": 333,
+          "ty": 811
+        },
+        {
+          "id": "bosven-veghel_x334_y811",
+          "file": "bosven-veghel_x334_y811.glb",
+          "origin_rd": [
+            167000.0,
+            405500.0
+          ],
+          "bbox_rd": [
+            167000.0,
+            405500.0,
+            167500.0,
+            406000.0
+          ],
+          "addresses": "bosven-veghel_x334_y811-addresses.json",
+          "nav": "bosven-veghel_x334_y811-nav.json",
+          "tx": 334,
+          "ty": 811
+        }
+      ],
+      "buurten": [
+        {
+          "naam": "'t Ven Oost",
+          "wijk": null,
+          "rd": [
+            167039.4,
+            404899.4
+          ]
+        },
+        {
+          "naam": "'t Ven West",
+          "wijk": null,
+          "rd": [
+            166541.1,
+            404823.9
+          ]
+        },
+        {
+          "naam": "Amert en Binnenveld",
+          "wijk": null,
+          "rd": [
+            164369.1,
+            403589.5
+          ]
+        },
+        {
+          "naam": "Beugt",
+          "wijk": null,
+          "rd": [
+            162710.9,
+            405362.4
+          ]
+        },
+        {
+          "naam": "Buitengebied Driehuizen en Hazelberg",
+          "wijk": null,
+          "rd": [
+            166991.8,
+            406085.4
+          ]
+        },
+        {
+          "naam": "Buitengebied Heuvel en Havelt",
+          "wijk": null,
+          "rd": [
+            167711.6,
+            401315.3
+          ]
+        },
+        {
+          "naam": "Buitengebied Sportpark en Dorshout",
+          "wijk": null,
+          "rd": [
+            163887.1,
+            404645.9
+          ]
+        },
+        {
+          "naam": "Bunderse Hoek Noord",
+          "wijk": null,
+          "rd": [
+            167232.0,
+            404259.2
+          ]
+        },
+        {
+          "naam": "Bunderse Hoek Zuid",
+          "wijk": null,
+          "rd": [
+            167217.9,
+            403920.0
+          ]
+        },
+        {
+          "naam": "Busselbunders",
+          "wijk": null,
+          "rd": [
+            166449.1,
+            403870.1
+          ]
+        },
+        {
+          "naam": "Hazelberg",
+          "wijk": null,
+          "rd": [
+            164886.4,
+            406920.4
+          ]
+        },
+        {
+          "naam": "Heibunders",
+          "wijk": null,
+          "rd": [
+            166559.2,
+            404248.4
+          ]
+        },
+        {
+          "naam": "Koolenkampen en Iepenlaan",
+          "wijk": null,
+          "rd": [
+            165974.7,
+            403673.4
+          ]
+        },
+        {
+          "naam": "Laarbunders",
+          "wijk": null,
+          "rd": [
+            166775.4,
+            403471.0
+          ]
+        },
+        {
+          "naam": "Veghel Centrum",
+          "wijk": null,
+          "rd": [
+            166050.5,
+            403248.8
+          ]
+        },
+        {
+          "naam": "Vijverwijk",
+          "wijk": null,
+          "rd": [
+            165478.7,
+            403584.2
+          ]
+        }
+      ],
+      "attribution": "3DBAG (CC BY 4.0, tudelft3d & 3DGI) \u00b7 AHN/BGT/BAG \u00b7 CBS via PDOK"
+    }
+  ]
+}
